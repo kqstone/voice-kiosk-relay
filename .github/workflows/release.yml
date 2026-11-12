@@ -103,7 +103,13 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: 'platforms;android-34 build-tools;34.0.0'
+          packages: 'platforms;android-34 build-tools;34.0.0 ndk;29.0.14206865 cmake;3.31.6'
+
+      - name: Download KWS Model and Runtime AAR
+        run: bash scripts/download-models.sh
+
+      - name: Fetch pinned llama.cpp source
+        run: bash scripts/fetch-llama-cpp.sh
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4

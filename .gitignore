@@ -5,6 +5,11 @@ build/
 local.properties
 *.apk
 *.aab
+*.aar
+android/app/libs/
+android/app/src/main/assets/models/
+android/app/src/main/cpp/third_party/
+models/
 .idea/
 *.iml
 .cxx/
