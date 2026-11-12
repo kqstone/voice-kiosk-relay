@@ -15,6 +15,9 @@ class Settings:
     push_token: str = os.environ.get("PUSH_TOKEN", "")
     device_token: str = os.environ.get("DEVICE_TOKEN", "")
     tz: str = os.environ.get("TZ", "Asia/Shanghai")
+    llm_base_url: str = os.environ.get("LLM_BASE_URL", "http://100.68.168.204:8317")
+    llm_api_key: str = os.environ.get("LLM_API_KEY", "")
+    llm_model: str = os.environ.get("LLM_MODEL", "gemini-3.5-flash-lite")
 
 
 settings = Settings()

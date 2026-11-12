@@ -9,6 +9,12 @@ from app.auth import (
     verify_push_token,
 )
 from app.dashboard import render_dashboard
+from app.llm import (
+    BridgeLLMError,
+    build_chat_system_prompt,
+    format_board_summary,
+    llm_client,
+)
 from app.storage import board_storage
 
 app = FastAPI(title="Voice Kiosk Relay Bridge", version="0.1.0")
@@ -18,6 +24,16 @@ class PushBoardRequest(BaseModel):
     data: Any = None
     updated_at: str | None = None
     source: str = "muse"
+
+
+class ChatRequest(BaseModel):
+    text: str
+    session_id: str | None = None
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    route: str = "local"
 
 
 class ConnectionManager:
@@ -46,6 +62,42 @@ manager = ConnectionManager()
 @app.get("/health")
 def health() -> dict[str, bool]:
     return {"ok": True}
+
+
+@app.post(
+    "/api/v1/chat",
+    response_model=ChatResponse,
+    dependencies=[Depends(verify_device_token)],
+)
+async def chat_endpoint(payload: ChatRequest) -> ChatResponse:
+    if not payload.text or not payload.text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Text cannot be empty",
+        )
+
+    boards_summary = format_board_summary(board_storage)
+    system_prompt = build_chat_system_prompt(boards_summary)
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": payload.text.strip()},
+    ]
+
+    try:
+        reply = await llm_client.chat(messages=messages, temperature=0.7)
+    except BridgeLLMError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Bridge LLM error: {e}",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Unexpected bridge error: {e}",
+        )
+
+    return ChatResponse(reply=reply, route="local")
 
 
 @app.post("/api/v1/push/{board_id}", dependencies=[Depends(verify_push_token)])
