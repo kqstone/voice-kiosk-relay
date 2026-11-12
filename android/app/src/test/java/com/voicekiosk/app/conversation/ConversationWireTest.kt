@@ -1,11 +1,6 @@
 package com.voicekiosk.app.conversation
 
 import com.voicekiosk.app.bridge.ErrorEnvelope
-import com.voicekiosk.app.ondevice.route.Intents
-import com.voicekiosk.app.ondevice.route.Route
-import com.voicekiosk.app.ondevice.route.RouteDecision
-import com.voicekiosk.app.ondevice.route.RouteSource
-import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -14,86 +9,51 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ConversationWireTest {
-    private val play = RouteDecision(
-        Intents.MEDIA_PLAY,
-        mapOf("artist" to "周杰伦", "song" to "晴天"),
-        Route.LOCAL,
-        0.98,
-        RouteSource.RULE
-    )
-
     @Test
-    fun requestJsonUsesV2FieldNames() {
-        val ctx = ConversationContext(clock = { 1_000L }, epoch = "abc")
-        val t = ctx.record("播放晴天", "好的，正在播放。", TurnSource.LOCAL_RULE, play)
-        val req = CloudRequest("刚才那首是谁唱的", listOf(t), resetSession = true)
-        val json = ConversationWire.requestJson(req, "default", nowMs = 5_000L)
+    fun requestJsonUsesV1EndpointAndFields() {
+        val req = CloudRequest("今天有什么作业")
+        val json = ConversationWire.requestJson(req, "default")
         assertEquals("default", json.getString("session_id"))
-        assertEquals("刚才那首是谁唱的", json.getString("text"))
-        assertTrue(json.getBoolean("reset"))
-        assertFalse(json.has("session"))
-        assertFalse(json.has("reset_session"))
-        val turns = json.getJSONArray("local_turns")
-        assertEquals(1, turns.length())
-        assertEquals(t.id, turns.getJSONObject(0).getString("id"))
-        assertEquals(ConversationWire.PATH, "/api/v2/conversation/turns")
+        assertEquals("今天有什么作业", json.getString("text"))
+        assertFalse(json.has("reset"))
+        assertFalse(json.has("local_turns"))
+        assertEquals("/api/v1/chat", ConversationWire.PATH)
     }
 
     @Test
-    fun parseReplyActionsAndAckedIds() {
-        val json = JSONObject(
-            """{"reply":"正在打开作业看板","speak":true,"actions":[{"type":"focus_board","board_id":"homework"},{"type":"show_question","question_id":"q1"},{"type":""}],"acked_local_turn_ids":["a","b"]}"""
-        )
-        val parsed = ConversationWire.parseReply(json)
-        assertEquals("正在打开作业看板", parsed.reply)
-        assertTrue(parsed.speak)
-        assertEquals(listOf("a", "b"), parsed.ackedIds)
-        assertEquals(2, parsed.actions.size)
-        assertEquals(CloudAction("focus_board", "homework"), parsed.actions[0])
-        assertEquals("show_question", parsed.actions[1].type)
-        assertEquals("", parsed.actions[1].boardId)
-        val rich = ConversationWire.parseReply(
-            JSONObject(
-                """{"reply":"选一个","actions":[{"type":"show_question","question_id":"q9","prompt":"选班","options":["甲","乙"],"kind":"choice","expires_at":1700000100}]}"""
-            )
-        )
-        assertEquals("q9", rich.actions[0].questionId)
-        assertEquals("选班", rich.actions[0].prompt)
-        assertEquals(listOf("甲", "乙"), rich.actions[0].options)
-        assertEquals(1700000100.0, rich.actions[0].expiresAt, 0.01)
+    fun parseReplyLocalAndMuseRoutes() {
+        val localJson = JSONObject("""{"reply":"上海今天晴","route":"local"}""")
+        val localParsed = ConversationWire.parseReply(localJson)
+        assertEquals("上海今天晴", localParsed.reply)
+        assertEquals("local", localParsed.route)
+        assertNull(localParsed.conversationId)
+        assertTrue(localParsed.speak)
+
+        val museJson = JSONObject("""{"reply":"好，我去问问 Muse，稍等一下。","route":"muse","conversation_id":"c-123"}""")
+        val museParsed = ConversationWire.parseReply(museJson)
+        assertEquals("好，我去问问 Muse，稍等一下。", museParsed.reply)
+        assertEquals("muse", museParsed.route)
+        assertEquals("c-123", museParsed.conversationId)
+        assertTrue(museParsed.speak)
     }
 
     @Test
-    fun parseReplySpeakDefaultsTrueAndUnknownActionsKept() {
-        val json = JSONObject("""{"reply":"hi","actions":[{"type":"task_started"}]}""")
-        val parsed = ConversationWire.parseReply(json)
-        assertTrue(parsed.speak)
-        assertEquals(listOf(CloudAction("task_started")), parsed.actions)
-        val silent = ConversationWire.parseReply(JSONObject("""{"reply":"x","speak":false}"""))
+    fun parseReplySpeakFlag() {
+        val silent = ConversationWire.parseReply(JSONObject("""{"reply":"x","route":"local","speak":false}"""))
         assertFalse(silent.speak)
-        assertEquals(emptyList<CloudAction>(), silent.actions)
-        assertNull(silent.ackedIds)
-        assertNull(LocalTurnsCodec.acked(JSONObject("""{"local_turns_acked":["old"]}""")))
+        assertEquals("x", silent.reply)
     }
 
     @Test
-    fun parseActionsSkipsMalformedEntries() {
-        val arr = JSONArray("""[{"type":"focus_board","board_id":"a"},"nope",{"board_id":"x"},{"type":"focus_board","board_id":"b"}]""")
-        val actions = ConversationWire.parseActions(arr)
-        assertEquals(listOf(CloudAction("focus_board", "a"), CloudAction("focus_board", "b")), actions)
-        assertEquals(emptyList<CloudAction>(), ConversationWire.parseActions(null))
-    }
-
-    @Test
-    fun errorEnvelope401IsUnpaired() {
-        val body = """{"error":{"code":"unauthorized","message":"认证失败，令牌无效"}}"""
-        assertEquals(ErrorEnvelope.UNPAIRED_MESSAGE, ErrorEnvelope.userMessage(401, body))
-        assertEquals("配对码已过期", ErrorEnvelope.userMessage(400, """{"error":{"code":"pairing_expired","message":"配对码已过期"}}"""))
+    fun errorEnvelope401And403IsUnpaired() {
+        val body401 = """{"detail":"Missing Authorization header"}"""
+        assertEquals(ErrorEnvelope.UNPAIRED_MESSAGE, ErrorEnvelope.userMessage(401, body401))
+        val body403 = """{"detail":"Invalid device token"}"""
+        assertEquals(ErrorEnvelope.UNPAIRED_MESSAGE, ErrorEnvelope.userMessage(403, body403))
         assertEquals("服务错误 (HTTP 502)", ErrorEnvelope.userMessage(502, "not-json"))
-        assertEquals("上游超时", ErrorEnvelope.userMessage(426, """{"error":{"code":"upgrade","message":"上游超时"}}"""))
-        val parsed = ErrorEnvelope.parse(body)!!
-        assertEquals("unauthorized", parsed.code)
-        assertEquals("认证失败，令牌无效", parsed.message)
+        val parsed = ErrorEnvelope.parse("""{"error":{"code":"err1","message":"测试错误"}}""")!!
+        assertEquals("err1", parsed.code)
+        assertEquals("测试错误", parsed.message)
         assertNull(ErrorEnvelope.parse("{"))
     }
 }

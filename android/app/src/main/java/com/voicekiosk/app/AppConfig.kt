@@ -2,16 +2,8 @@ package com.voicekiosk.app
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
-import android.util.Base64
 import java.net.URI
-import java.security.KeyStore
 import java.util.Locale
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
 
 /**
  * Global configuration for Voice Kiosk.
@@ -24,10 +16,10 @@ object AppConfig {
     // Default configuration values from docs/SPEC-v1.md
     const val DEFAULT_WAKE_WORD = "你好小智"
     const val DEFAULT_WAKE_THRESHOLD = 0.25f
-    // Empty: when DASHBOARD_URL is not set separately, derive the bridge root (`/`).
+    // Empty: when DASHBOARD_URL is not set separately, derive the bridge root (/).
     const val DEFAULT_DASHBOARD_URL = ""
     const val LOCAL_PLACEHOLDER_DASHBOARD_URL = "file:///android_asset/dashboard-placeholder.html"
-    const val DEFAULT_BRIDGE_URL = "http://127.0.0.1:8093"
+    const val DEFAULT_BRIDGE_URL = "http://192.168.0.202:8093"
 
     // KWS Model and Audio constants
     const val AUDIO_SAMPLE_RATE = 16000
@@ -105,21 +97,29 @@ object AppConfig {
     const val DEFAULT_STARTUP_UPDATE_CHECK_ENABLED = false
     const val STARTUP_UPDATE_CHECK_COOLDOWN_MS = 24 * 60 * 60 * 1000L // 24 hours
 
-    // Encrypted Bridge Access Token storage (AndroidKeyStore AES/GCM/NoPadding + target origin binding)
-    private const val KEY_BRIDGE_TOKEN_CIPHERTEXT = "pref_bridge_token_ct"
-    private const val KEY_BRIDGE_TOKEN_IV = "pref_bridge_token_iv"
-    private const val KEY_BRIDGE_TOKEN_ORIGIN = "pref_bridge_token_origin"
-    private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
-    private const val KEYSTORE_ALIAS = "voice_kiosk_bridge_token_key_v1"
-    private const val AES_GCM_TRANSFORMATION = "AES/GCM/NoPadding"
-    private const val GCM_TAG_LENGTH_BITS = 128
+    // Device Token storage (plain text field configured in settings, sent as Bearer token)
+    const val KEY_DEVICE_TOKEN = "pref_device_token"
+
+    fun getDeviceToken(context: Context): String =
+        prefs(context).getString(KEY_DEVICE_TOKEN, "")?.trim().orEmpty()
+
+    fun setDeviceToken(context: Context, token: String) {
+        prefs(context).edit().putString(KEY_DEVICE_TOKEN, token.trim()).apply()
+    }
+
+    fun hasDeviceToken(context: Context): Boolean =
+        getDeviceToken(context).isNotEmpty()
+
+    fun clearDeviceToken(context: Context) {
+        prefs(context).edit().remove(KEY_DEVICE_TOKEN).apply()
+    }
 
     private fun prefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
     /**
-     * Normalizes a URL into `scheme://host:port` origin format for token host-binding checks.
+     * Normalizes a URL into scheme://host:port origin format for token host-binding checks.
      * Returns empty string if the URL is invalid or lacks scheme/host.
      */
     fun normalizeBridgeOrigin(rawUrl: String): String {
@@ -141,101 +141,29 @@ object AppConfig {
         }
     }
 
-    private fun getOrCreateSecretKey(): SecretKey {
-        val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-        val existing = keyStore.getEntry(KEYSTORE_ALIAS, null) as? KeyStore.SecretKeyEntry
-        if (existing != null) {
-            return existing.secretKey
-        }
-        val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, KEYSTORE_PROVIDER)
-        val spec = KeyGenParameterSpec.Builder(
-            KEYSTORE_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
-        )
-            .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-            .setKeySize(256)
-            .build()
-        keyGenerator.init(spec)
-        return keyGenerator.generateKey()
-    }
-
-    fun hasBridgeAuthToken(context: Context): Boolean {
-        val p = prefs(context)
-        return !p.getString(KEY_BRIDGE_TOKEN_CIPHERTEXT, null).isNullOrEmpty() &&
-            !p.getString(KEY_BRIDGE_TOKEN_IV, null).isNullOrEmpty() &&
-            !p.getString(KEY_BRIDGE_TOKEN_ORIGIN, null).isNullOrEmpty()
-    }
+    fun hasBridgeAuthToken(context: Context): Boolean = hasDeviceToken(context)
 
     fun clearBridgeAuthToken(context: Context) {
-        prefs(context).edit()
-            .remove(KEY_BRIDGE_TOKEN_CIPHERTEXT)
-            .remove(KEY_BRIDGE_TOKEN_IV)
-            .remove(KEY_BRIDGE_TOKEN_ORIGIN)
-            .apply()
+        clearDeviceToken(context)
     }
 
-    /**
-     * Encrypts and stores the bridge access token bound to the normalized origin of `targetBridgeUrl`.
-     * Never writes plaintext token to SharedPreferences or logs.
-     */
     fun setBridgeAuthToken(context: Context, rawToken: String, targetBridgeUrl: String = getBridgeUrl(context)): Boolean {
-        val trimmed = rawToken.trim()
-        if (trimmed.isEmpty()) {
-            clearBridgeAuthToken(context)
-            return true
-        }
-        val origin = normalizeBridgeOrigin(targetBridgeUrl)
-        if (origin.isEmpty()) {
-            return false
-        }
-        return try {
-            val secretKey = getOrCreateSecretKey()
-            val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
-            cipher.init(Cipher.ENCRYPT_MODE, secretKey)
-            val ivBytes = cipher.iv
-            val cipherBytes = cipher.doFinal(trimmed.toByteArray(Charsets.UTF_8))
-            prefs(context).edit()
-                .putString(KEY_BRIDGE_TOKEN_CIPHERTEXT, Base64.encodeToString(cipherBytes, Base64.NO_WRAP))
-                .putString(KEY_BRIDGE_TOKEN_IV, Base64.encodeToString(ivBytes, Base64.NO_WRAP))
-                .putString(KEY_BRIDGE_TOKEN_ORIGIN, origin)
-                .apply()
-            true
-        } catch (_: Exception) {
-            false
-        }
+        setDeviceToken(context, rawToken)
+        return true
     }
 
-    /**
-     * Decrypts and returns the bridge access token ONLY if `requestBridgeUrl` matches the bound origin.
-     * If the bridge origin changed without re-entering/confirming the token, returns empty string
-     * so credentials are never leaked across hosts.
-     */
     fun getBridgeAuthTokenForUrl(context: Context, requestBridgeUrl: String): String {
-        val p = prefs(context)
-        val ctB64 = p.getString(KEY_BRIDGE_TOKEN_CIPHERTEXT, null) ?: return ""
-        val ivB64 = p.getString(KEY_BRIDGE_TOKEN_IV, null) ?: return ""
         val savedOrigin = getBoundBridgeOrigin(context)
-        if (savedOrigin.isEmpty()) return ""
         val currentOrigin = normalizeBridgeOrigin(requestBridgeUrl)
-        if (currentOrigin.isEmpty() || currentOrigin != savedOrigin) {
+        if (savedOrigin.isNotEmpty() && currentOrigin.isNotEmpty() && savedOrigin != currentOrigin) {
             return ""
         }
-        return try {
-            val secretKey = getOrCreateSecretKey()
-            val cipher = Cipher.getInstance(AES_GCM_TRANSFORMATION)
-            val ivBytes = Base64.decode(ivB64, Base64.NO_WRAP)
-            val cipherBytes = Base64.decode(ctB64, Base64.NO_WRAP)
-            cipher.init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, ivBytes))
-            String(cipher.doFinal(cipherBytes), Charsets.UTF_8).trim()
-        } catch (_: Exception) {
-            ""
-        }
+        return getDeviceToken(context)
     }
 
-    /** Origin the device token is bound to (`scheme://host:port`); empty if unpaired. */
+    /** Origin the device token is bound to (scheme://host:port); empty if unpaired. */
     fun getBoundBridgeOrigin(context: Context): String =
-        prefs(context).getString(KEY_BRIDGE_TOKEN_ORIGIN, "") ?: ""
+        normalizeBridgeOrigin(getBridgeUrl(context))
 
     fun getWakeWord(context: Context): String =
         prefs(context).getString(KEY_WAKE_WORD, DEFAULT_WAKE_WORD) ?: DEFAULT_WAKE_WORD

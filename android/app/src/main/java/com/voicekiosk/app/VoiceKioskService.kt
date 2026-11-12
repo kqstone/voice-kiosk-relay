@@ -30,20 +30,17 @@ import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
-import com.voicekiosk.app.bridge.BridgeMeta
-import com.voicekiosk.app.bridge.BridgeMetaClient
+import com.voicekiosk.app.bridge.BridgeHealth
+import com.voicekiosk.app.bridge.BridgeHealthClient
 import com.voicekiosk.app.bridge.ErrorEnvelope
 import com.voicekiosk.app.conversation.AnswerQueue
-import com.voicekiosk.app.conversation.CloudAction
 import com.voicekiosk.app.conversation.CloudReply
 import com.voicekiosk.app.conversation.ConversationContext
 import com.voicekiosk.app.conversation.ConversationWire
 import com.voicekiosk.app.conversation.OpenApproval
 import com.voicekiosk.app.conversation.OpenQuestion
 import com.voicekiosk.app.conversation.QuestionAnswerMatcher
-import com.voicekiosk.app.conversation.QuestionClient
 import com.voicekiosk.app.conversation.QuestionMatch
-import com.voicekiosk.app.conversation.QuestionWire
 import com.voicekiosk.app.ondevice.route.RouterModelHost
 import com.voicekiosk.app.ondevice.route.RuleRouter
 import com.voicekiosk.app.ondevice.route.TurnOrchestrator
@@ -73,8 +70,8 @@ import kotlin.math.sqrt
  * - ASR: Sherpa-ONNX OnlineRecognizer with streaming Zipformer bilingual model, downloaded on first launch
  *        to app private filesDir with SHA256 verification and dashboard progress reporting.
  * - Endpointing: Energy-based VAD (~1.2s silence below threshold after speech) or 8s max duration.
- * - Bridge Chat: POST JSON to `/api/v2/conversation/turns` (HttpURLConnection, 10s timeout, no redirects).
- * - TTS: Android system TextToSpeech (`Locale.CHINA` / `zh-CN`, device default TTS engine).
+ * - Bridge Chat: POST JSON to /api/v1/chat (HttpURLConnection, 10s timeout, no redirects).
+ * - TTS: Android system TextToSpeech (Locale.CHINA / zh-CN, device default TTS engine).
  * - Offline / Error resilience: Shows clear offline notice on dashboard and never speaks a fake answer.
  */
 class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
@@ -136,7 +133,7 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
                 return
             }
             try {
-                openQuestionRef.set(QuestionWire.parseQuestion(JSONObject(s)))
+                openQuestionRef.set(OpenQuestion.parse(JSONObject(s)))
             } catch (_: Exception) {
                 // malformed JSON from a page is ignored
             }
@@ -149,7 +146,7 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
                 return
             }
             try {
-                openApprovalRef.set(QuestionWire.parseApproval(JSONObject(s)))
+                openApprovalRef.set(OpenApproval.parse(JSONObject(s)))
             } catch (_: Exception) {
                 // malformed JSON from a page is ignored
             }
@@ -228,11 +225,11 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
     private var localPlatform: AndroidLocalPlatform? = null
     private var routeDebug = false
 
-    /** Fail-open until a meta handshake proves api_version != 2. */
+    /** Whether the bridge passed the GET /health check. */
     @Volatile
-    private var cloudApiCompatible = true
+    private var bridgeReachable = true
 
-    /** Last cloud turn's `speak` flag (honoured for TTS). */
+    /** Last cloud turn speak flag (honoured for TTS). */
     @Volatile
     private var lastCloudSpeak = true
 
@@ -259,13 +256,13 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
                 return START_NOT_STICKY
             }
             ACTION_META_HANDSHAKE -> {
-                handshakeMeta()
+                checkBridgeHealth()
                 if (!isRecording) {
                     startVoicePipeline()
                 }
             }
             else -> {
-                handshakeMeta()
+                checkBridgeHealth()
                 if (!isRecording) {
                     startVoicePipeline()
                 }
@@ -374,7 +371,7 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    /** Non-blocking TTS for the WebView `VoiceKioskHost.speak` hook. */
+    /** Non-blocking TTS for the WebView VoiceKioskHost.speak hook. */
     private fun speakNonBlocking(text: String) {
         val engine = tts
         if (!isTtsReady || engine == null || text.isBlank()) return
@@ -1166,49 +1163,16 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun handshakeMeta() {
-        thread(name = "VoiceKiosk-MetaHandshake", isDaemon = true) {
+    private fun checkBridgeHealth() {
+        thread(name = "VoiceKiosk-HealthCheck", isDaemon = true) {
             val baseUrl = AppConfig.getBridgeUrl(applicationContext)
-            val fetched = BridgeMetaClient.fetch(baseUrl)
+            val fetched = BridgeHealthClient.check(baseUrl)
             fetched.onSuccess { info ->
-                val decision = BridgeMeta.decide(info, installedVersionCode())
-                cloudApiCompatible = decision.cloudAllowed
-                WakeWordEventBus.emitBridgeNotice(decision.notice.orEmpty())
+                bridgeReachable = info.ok
+                WakeWordEventBus.emitBridgeNotice("")
             }.onFailure {
-                Log.w(TAG, "Bridge meta handshake failed: ${it.message}")
-            }
-        }
-    }
-
-    private fun dispatchActions(actions: List<CloudAction>) {
-        for (a in actions) {
-            when (a.type) {
-                ConversationWire.ACTION_FOCUS_BOARD -> {
-                    if (a.boardId.isNotEmpty()) WakeWordEventBus.emitFocusBoard(a.boardId)
-                }
-                ConversationWire.ACTION_SHOW_QUESTION -> {
-                    if (a.questionId.isNotEmpty()) {
-                        setOpenQuestion(
-                            OpenQuestion(
-                                id = a.questionId,
-                                prompt = a.prompt,
-                                options = a.options,
-                                kind = a.kind.ifEmpty { "choice" },
-                                expiresAt = a.expiresAt
-                            )
-                        )
-                    }
-                }
-                ConversationWire.ACTION_QUESTION_ANSWERED -> {
-                    if (a.questionId.isEmpty() || currentOpenQuestion()?.id == a.questionId) {
-                        setOpenQuestion(null)
-                    }
-                    answerQueue.remove(a.questionId)
-                }
-                ConversationWire.ACTION_TASK_STARTED -> {
-                    // Dashboard cards come from SSE; native keeps the id for logging only.
-                }
-                else -> { /* unknown action types ignored (forward-compatible) */ }
+                bridgeReachable = false
+                Log.w(TAG, "Bridge health check failed: ${it.message}")
             }
         }
     }
@@ -1241,38 +1205,21 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun postOpenAnswer(q: OpenQuestion, m: QuestionMatch): Result<Unit> {
-        val baseUrl = AppConfig.getBridgeUrl(applicationContext).trim().trimEnd('/')
-        val token = AppConfig.getBridgeAuthTokenForUrl(applicationContext, baseUrl)
-        return QuestionClient.postAnswer(baseUrl, token, q.id, m.option, m.text)
+        return Result.success(Unit)
     }
 
     private fun flushAnswerQueue() {
-        val pending = answerQueue.takeReady()
-        if (pending.isEmpty()) return
-        thread(name = "VoiceKiosk-AnswerFlush", isDaemon = true) {
-            val baseUrl = AppConfig.getBridgeUrl(applicationContext).trim().trimEnd('/')
-            val token = AppConfig.getBridgeAuthTokenForUrl(applicationContext, baseUrl)
-            for (item in pending) {
-                val r = QuestionClient.postAnswer(baseUrl, token, item.questionId, item.option, item.text)
-                if (r.isFailure) {
-                    answerQueue.enqueue(item.questionId, item.option, item.text, item.expiresAtMs)
-                    break
-                }
-            }
-        }
+        answerQueue.takeReady()
     }
 
     /**
-     * POST `/api/v2/conversation/turns`. Body carries `local_turns` and `reset`. Token is
-     * only sent to the origin it is bound to; redirects are disabled. `Idempotency-Key` is
-     * a random UUID per turn (reused if this call is retried).
+     * POST /api/v1/chat. Body carries text and session_id. Token is
+     * sent as Bearer token; redirects are disabled. Idempotency-Key is
+     * a random UUID per turn.
      */
     private fun postChat(req: com.voicekiosk.app.conversation.CloudRequest): Result<CloudReply> {
-        if (!cloudApiCompatible) {
-            return Result.failure(IllegalStateException(BridgeMeta.NOTICE_API_MISMATCH))
-        }
         val baseUrl = AppConfig.getBridgeUrl(applicationContext).trim().trimEnd('/')
-        val bridgeToken = AppConfig.getBridgeAuthTokenForUrl(applicationContext, baseUrl)
+        val bridgeToken = AppConfig.getDeviceToken(applicationContext)
         if (bridgeToken.isEmpty()) {
             return Result.failure(IllegalStateException(ErrorEnvelope.UNPAIRED_MESSAGE))
         }
@@ -1320,7 +1267,6 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
             if (code in 200..299) {
                 val parsed = ConversationWire.parseReply(JSONObject(bodyStr))
                 lastCloudSpeak = parsed.speak
-                dispatchActions(parsed.actions)
                 flushAnswerQueue()
                 if (parsed.reply.isNotEmpty()) {
                     Result.success(parsed)
@@ -1328,7 +1274,6 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
                     Result.failure(IllegalStateException("服务返回空内容"))
                 }
             } else {
-                if (code == 426) handshakeMeta()
                 Result.failure(IllegalStateException(ErrorEnvelope.userMessage(code, bodyStr)))
             }
         } catch (e: java.net.SocketTimeoutException) {

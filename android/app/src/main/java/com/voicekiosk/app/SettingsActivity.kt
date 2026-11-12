@@ -39,7 +39,7 @@ import kotlin.math.roundToInt
  * - Threshold slider (range 0.10 - 0.50 in 0.05 steps, default 0.25)
  * - Zero-API-key weather location switcher (preset cities & geocoding search)
  * - OLED AOD standby & night mode schedule/dimmer controls
- * - Device pairing: 8-digit code from Studio exchanged for an origin-bound device token
+ * - Device token: DEVICE_TOKEN configured from NAS .env for bridge authentication
  *   (FLAG_SECURE, never echoed or logged)
  * - Immediate restart of VoiceKioskService upon save
  * - GitHub Release update checker card: current version display, manual check button,
@@ -92,11 +92,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
     private lateinit var nightDimSeekBar: SeekBar
     private lateinit var nightDimValueText: TextView
 
-    // Bridge & Dashboard URLs / device pairing
+    // Bridge & Dashboard URLs / device token
     private lateinit var bridgeUrlEditText: EditText
-    private lateinit var pairingCodeEditText: EditText
-    private lateinit var pairingDeviceNameEditText: EditText
-    private lateinit var pairingStatusText: TextView
+    private lateinit var deviceTokenEditText: EditText
     private lateinit var dashboardUrlEditText: EditText
 
     // App Version & Update Check
@@ -1027,7 +1025,7 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         urlCard.addView(dashboardUrlEditText)
 
         val urlHint = TextView(this).apply {
-            text = "留空将自动恢复默认配置。仪表盘默认加载桥接服务根路径。若修改桥接服务主机/端口，已配对的设备令牌将自动清除。"
+            text = "留空将自动恢复默认配置。仪表盘默认加载桥接服务根路径。"
             setTextColor(Color.parseColor("#9CA3AF"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             val lp = LinearLayout.LayoutParams(
@@ -1040,8 +1038,8 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         }
         urlCard.addView(urlHint)
 
-        val pairingLabel = TextView(this).apply {
-            text = "设备配对"
+        val tokenLabel = TextView(this).apply {
+            text = "设备令牌 (DEVICE_TOKEN)"
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
             typeface = Typeface.DEFAULT_BOLD
@@ -1053,9 +1051,11 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
             }
             layoutParams = lp
         }
-        urlCard.addView(pairingLabel)
+        urlCard.addView(tokenLabel)
 
-        pairingStatusText = TextView(this).apply {
+        val tokenHint = TextView(this).apply {
+            text = "粘贴 NAS .env 中的 DEVICE_TOKEN（明文文本输入，仅在保存时写入设置，从不上传或记入日志）。"
+            setTextColor(Color.parseColor("#9CA3AF"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             val lp = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
@@ -1065,56 +1065,20 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
             }
             layoutParams = lp
         }
-        urlCard.addView(pairingStatusText)
-        refreshPairingStatus()
+        urlCard.addView(tokenHint)
 
-        pairingCodeEditText = EditText(this).apply {
-            setText("")
-            isSaveEnabled = false
-            isSaveFromParentEnabled = false
-            hint = "Studio 生成的 8 位配对码"
+        deviceTokenEditText = EditText(this).apply {
+            val storedToken = AppConfig.getDeviceToken(this@SettingsActivity)
+            setText(storedToken)
+            if (storedToken.isNotEmpty()) {
+                setSelection(storedToken.length)
+            }
+            hint = "粘贴 NAS .env 中的 DEVICE_TOKEN"
             setHintTextColor(Color.parseColor("#6B7280"))
             setTextColor(Color.WHITE)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             isSingleLine = true
             maxLines = 1
-            filters = arrayOf(InputFilter.LengthFilter(8))
-            inputType = InputType.TYPE_CLASS_NUMBER
-            imeOptions = EditorInfo.IME_ACTION_NEXT or
-                EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or
-                EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO
-
-            val padH = dpToPx(12)
-            val padV = dpToPx(10)
-            setPadding(padH, padV, padH, padV)
-
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dpToPx(8).toFloat()
-                setColor(Color.parseColor("#1F2937"))
-                setStroke(dpToPx(1), Color.parseColor("#4B5563"))
-            }
-
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                bottomMargin = dpToPx(8)
-            }
-            layoutParams = lp
-        }
-        urlCard.addView(pairingCodeEditText)
-
-        pairingDeviceNameEditText = EditText(this).apply {
-            setText("")
-            hint = "设备名称（可选，默认 kiosk）"
-            setHintTextColor(Color.parseColor("#6B7280"))
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            isSingleLine = true
-            maxLines = 1
-            filters = arrayOf(InputFilter.LengthFilter(64))
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             imeOptions = EditorInfo.IME_ACTION_DONE or
                 EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING or
@@ -1140,35 +1104,10 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
             }
             layoutParams = lp
         }
-        urlCard.addView(pairingDeviceNameEditText)
+        urlCard.addView(deviceTokenEditText)
 
-        val pairButton = TextView(this).apply {
-            text = "配对"
-            setTextColor(Color.parseColor("#ECFDF5"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            typeface = Typeface.DEFAULT_BOLD
-            val padH = dpToPx(14)
-            val padV = dpToPx(8)
-            setPadding(padH, padV, padH, padV)
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dpToPx(6).toFloat()
-                setColor(Color.parseColor("#065F46"))
-                setStroke(dpToPx(1), Color.parseColor("#10B981"))
-            }
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                bottomMargin = dpToPx(8)
-            }
-            layoutParams = lp
-            setOnClickListener { startPairing(this) }
-        }
-        urlCard.addView(pairButton)
-
-        val unpairButton = TextView(this).apply {
-            text = "取消配对"
+        val clearTokenButton = TextView(this).apply {
+            text = "清除设备令牌"
             setTextColor(Color.parseColor("#F87171"))
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
             val padH = dpToPx(10)
@@ -1188,13 +1127,12 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
             }
             layoutParams = lp
             setOnClickListener {
-                AppConfig.clearBridgeAuthToken(this@SettingsActivity)
-                pairingCodeEditText.setText("")
-                refreshPairingStatus()
-                Toast.makeText(this@SettingsActivity, "已取消配对", Toast.LENGTH_SHORT).show()
+                deviceTokenEditText.setText("")
+                AppConfig.clearDeviceToken(this@SettingsActivity)
+                Toast.makeText(this@SettingsActivity, "已清除设备令牌", Toast.LENGTH_SHORT).show()
             }
         }
-        urlCard.addView(unpairButton)
+        urlCard.addView(clearTokenButton)
 
         container.addView(urlCard)
 
@@ -1652,11 +1590,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         AppConfig.setWakeThreshold(this, roundedThreshold)
         AppConfig.setBridgeUrl(this, finalBridgeUrl)
         AppConfig.setDashboardUrl(this, finalDashboardUrl)
+        val finalDeviceToken = deviceTokenEditText.text.toString().trim()
+        AppConfig.setDeviceToken(this, finalDeviceToken)
         AppConfig.setStartupUpdateCheckEnabled(this, startupCheckCheckBox.isChecked)
-
-        if (originChanged) {
-            AppConfig.clearBridgeAuthToken(this)
-        }
         Log.i(TAG, "Successfully updated wake word to '$rawWord', threshold to $roundedThreshold, weather location to '$selectedWeatherCity' ($selectedWeatherLat, $selectedWeatherLon)")
 
         // 9. Restart VoiceKioskService immediately
@@ -1915,57 +1851,6 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         return (dp * resources.displayMetrics.density).toInt()
     }
 
-    private fun refreshPairingStatus() {
-        if (!::pairingStatusText.isInitialized) return
-        val paired = AppConfig.hasBridgeAuthToken(this)
-        pairingStatusText.text = if (paired) {
-            "当前状态：已配对（设备令牌已加密存储，不明文回显）"
-        } else {
-            "当前状态：未配对。在 Studio 生成配对码后填入上方。"
-        }
-        pairingStatusText.setTextColor(
-            if (paired) Color.parseColor("#10B981") else Color.parseColor("#9CA3AF")
-        )
-    }
-
-    private fun startPairing(pairButton: TextView) {
-        if (!isUiSafeForInteraction()) return
-        val rawBridgeUrl = bridgeUrlEditText.text.toString().trim()
-        val finalBridgeUrl = if (rawBridgeUrl.isNotEmpty()) rawBridgeUrl else AppConfig.DEFAULT_BRIDGE_URL
-        if (AppConfig.normalizeBridgeOrigin(finalBridgeUrl).isEmpty()) {
-            Toast.makeText(this, "桥接服务地址格式无效（需包含 http:// 或 https:// 主机地址）", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val code = pairingCodeEditText.text.toString()
-        val deviceName = pairingDeviceNameEditText.text.toString()
-        pairButton.isEnabled = false
-        pairButton.alpha = 0.6f
-        Thread({
-            val result = com.voicekiosk.app.bridge.PairingClient.pair(finalBridgeUrl, code, deviceName)
-            runOnUiThread {
-                pairButton.isEnabled = true
-                pairButton.alpha = 1f
-                if (!isUiSafeForInteraction()) return@runOnUiThread
-                result.fold(
-                    onSuccess = { paired ->
-                        AppConfig.setBridgeUrl(this, finalBridgeUrl)
-                        val saved = AppConfig.setBridgeAuthToken(this, paired.deviceToken, finalBridgeUrl)
-                        pairingCodeEditText.setText("")
-                        if (saved) {
-                            refreshPairingStatus()
-                            Toast.makeText(this, "配对成功", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(this, "配对成功但保存设备令牌失败", Toast.LENGTH_SHORT).show()
-                        }
-                    },
-                    onFailure = { err ->
-                        Toast.makeText(this, err.message ?: "配对失败", Toast.LENGTH_LONG).show()
-                    }
-                )
-            }
-        }, "VoiceKiosk-Pairing").apply { isDaemon = true }.start()
-    }
-
     /**
      * S6: on-device features in one card, grouped as 本地指令 (all tiers) → 端侧模型 (tier
      * status, download/delete the tier's default model, model routing, speculative cloud) →
@@ -2126,7 +2011,7 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
             "对话结束后整理长期记忆：音乐偏好、称呼、作息、城市等自动记下，家人称呼和饮食偏好先语音询问；健康、财务、证件、联系方式、住址等从不记录",
             AppConfig.isMemoryExtractionEnabled(this)
         )
-        note("需要先完成设备配对，并在桥上开启长期记忆（MEMORY_ENABLED）。高档机已下载模型时，规则没抽到的句子再交给模型。")
+        note("需要在设置中配置设备令牌，并在桥上开启长期记忆（MEMORY_ENABLED）。高档机已下载模型时，规则没抽到的句子再交给模型。")
         button("查看已记住的内容") { showMemoryDialog() }
 
         // ---- 调试与评测 ----
