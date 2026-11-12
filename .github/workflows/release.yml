@@ -1,0 +1,291 @@
+# =============================================================================
+# Release Workflow for Voice Kiosk Relay
+#
+# NOTE ON SIGNING SECRETS:
+# The user will copy the two signing Secrets (ANDROID_KEYSTORE_BASE64 and
+# ANDROID_KEYSTORE_PASSWORD, plus optional ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD)
+# from the voice-kiosk repo to this repo in the GitHub web UI.
+# This workflow is designed to work once those Secrets exist; it is expected
+# to fail at the signing step until they are copied.
+# =============================================================================
+
+name: Release Voice Kiosk Relay
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: relay-release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-release:
+    name: Secret Scan and Version Allocation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version_name: ${{ steps.version.outputs.version_name }}
+      version_code: ${{ steps.version.outputs.version_code }}
+      semver: ${{ steps.version.outputs.semver }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run repository secret scan
+        run: |
+          set -euo pipefail
+          echo "Scanning for forbidden .env files..."
+          ENV_FILES="$(find . -name ".env" -not -path "./.git/*" || true)"
+          if [ -n "${ENV_FILES}" ]; then
+            echo "ERROR: Real .env file found in repository:" >&2
+            echo "${ENV_FILES}" >&2
+            exit 1
+          fi
+
+          echo "Scanning tracked files for token / key secrets..."
+          FOUND_SECRETS="$(git grep -n -E '(PUSH_TOKEN|DEVICE_TOKEN|LLM_API_KEY)[[:space:]]*[:=][[:space:]]*["'\'']?[0-9a-zA-Z+/=_-]{20,}' -- ':!relay-bridge/example.env' || true)"
+          if [ -n "${FOUND_SECRETS}" ]; then
+            echo "ERROR: Real secret token or API key pattern detected in tracked files:" >&2
+            echo "${FOUND_SECRETS}" >&2
+            exit 1
+          fi
+
+          if [ -f relay-bridge/example.env ]; then
+            NON_PLACEHOLDER="$(grep -E '^(PUSH_TOKEN|DEVICE_TOKEN|LLM_API_KEY)=' relay-bridge/example.env | grep -v 'placeholder' || true)"
+            if [ -n "${NON_PLACEHOLDER}" ]; then
+              echo "ERROR: relay-bridge/example.env must contain only placeholder values:" >&2
+              echo "${NON_PLACEHOLDER}" >&2
+              exit 1
+            fi
+          fi
+
+          echo "Secret scan passed successfully."
+
+      - name: Run version script tests
+        run: python3 -m unittest scripts/test_release_version.py
+
+      - name: Compute next release version
+        id: version
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/release_version.py
+
+  build-android-apk:
+    name: Build Signed Android Release APK
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 build-tools;34.0.0'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.5'
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x android/gradlew
+
+      - name: Run Android unit tests
+        working-directory: android
+        env:
+          VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
+          VERSION_NAME: ${{ needs.prepare-release.outputs.version_name }}
+        run: ./gradlew :app:testDebugUnitTest :app:testReleaseUnitTest
+
+      - name: Build debug APK for compile verification
+        working-directory: android
+        env:
+          VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
+          VERSION_NAME: ${{ needs.prepare-release.outputs.version_name }}
+        run: ./gradlew :app:assembleDebug
+
+      - name: Decode release keystore and build signed release APK
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
+          VERSION_NAME: ${{ needs.prepare-release.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ] || [ -z "${ANDROID_KEYSTORE_PASSWORD:-}" ]; then
+            echo "ERROR: ANDROID_KEYSTORE_BASE64 and ANDROID_KEYSTORE_PASSWORD secrets must be configured in repository." >&2
+            exit 1
+          fi
+
+          KEYSTORE_TMP_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/vk-ks-XXXXXX")"
+          chmod 700 "${KEYSTORE_TMP_DIR}"
+          KEYSTORE_FILE="${KEYSTORE_TMP_DIR}/release.keystore"
+          trap 'rm -rf "${KEYSTORE_TMP_DIR}"' EXIT
+
+          echo "${ANDROID_KEYSTORE_BASE64}" | base64 -d > "${KEYSTORE_FILE}"
+          chmod 600 "${KEYSTORE_FILE}"
+
+          export ANDROID_KEYSTORE_PATH="${KEYSTORE_FILE}"
+          export ANDROID_KEY_ALIAS="${ANDROID_KEY_ALIAS:-voice-kiosk}"
+          export ANDROID_KEY_PASSWORD="${ANDROID_KEY_PASSWORD:-${ANDROID_KEYSTORE_PASSWORD}}"
+          unset ANDROID_KEYSTORE_BASE64
+
+          ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Verify signed release APK
+        run: |
+          set -euo pipefail
+          APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "${APK_PATH}" ]; then
+            echo "ERROR: Signed release APK not found at ${APK_PATH}" >&2
+            exit 1
+          fi
+
+          BUILD_TOOLS_DIR="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}/build-tools/34.0.0"
+          if [ ! -d "${BUILD_TOOLS_DIR}" ]; then
+            BUILD_TOOLS_DIR="$(find "${ANDROID_SDK_ROOT:-${ANDROID_HOME}}/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          fi
+
+          echo "Using Android build tools from: ${BUILD_TOOLS_DIR}"
+          "${BUILD_TOOLS_DIR}/apksigner" verify --verbose "${APK_PATH}"
+          "${BUILD_TOOLS_DIR}/aapt2" dump badging "${APK_PATH}"
+
+      - name: Upload signed APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+  build-bridge-image:
+    name: Build and Push Relay Bridge Image
+    needs: prepare-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push bridge Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./relay-bridge
+          file: ./relay-bridge/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/kqstone/voice-kiosk-relay:${{ needs.prepare-release.outputs.version_name }}
+            ghcr.io/kqstone/voice-kiosk-relay:latest
+
+  publish-release:
+    name: Publish GitHub Release
+    needs:
+      - prepare-release
+      - build-android-apk
+      - build-bridge-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download signed APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-release-apk
+          path: release-assets
+
+      - name: Prepare release assets and generate SHA256SUMS
+        run: |
+          set -euo pipefail
+          if [ ! -f release-assets/app-release.apk ]; then
+            find release-assets -name "app-release.apk" -exec mv {} release-assets/app-release.apk \;
+          fi
+
+          cp relay-bridge/docker-compose.yml release-assets/docker-compose.yml
+          cp relay-bridge/example.env release-assets/example.env
+
+          if [ -f release-assets/.env ]; then
+            echo "ERROR: Real .env must never be present in release assets" >&2
+            exit 1
+          fi
+
+          cd release-assets
+          sha256sum app-release.apk docker-compose.yml example.env > SHA256SUMS
+          echo "Generated SHA256SUMS:"
+          cat SHA256SUMS
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION_NAME: ${{ needs.prepare-release.outputs.version_name }}
+        run: |
+          set -euo pipefail
+          cat <<EOF > release-notes.md
+          ## Voice Kiosk Relay Release ${VERSION_NAME}
+
+          ### Bridge Docker Image
+          - ghcr.io/kqstone/voice-kiosk-relay:${VERSION_NAME}
+          - ghcr.io/kqstone/voice-kiosk-relay:latest
+
+          ### Release Assets
+          - app-release.apk: Signed Android APK
+          - docker-compose.yml: NAS deployment compose definition
+          - example.env: Template environment variables (fill secrets on NAS only)
+          - SHA256SUMS: Cryptographic checksums of release bundle files
+
+          ### NAS Update Command
+          1. Pull the new image tag:
+             docker pull ghcr.io/kqstone/voice-kiosk-relay:${VERSION_NAME}
+          2. Recreate the container:
+             docker compose up -d --force-recreate
+          EOF
+
+          gh release create "${VERSION_NAME}" \
+            --title "Voice Kiosk Relay ${VERSION_NAME}" \
+            --notes-file release-notes.md \
+            --target "${GITHUB_SHA}" \
+            release-assets/app-release.apk \
+            release-assets/docker-compose.yml \
+            release-assets/example.env \
+            release-assets/SHA256SUMS

@@ -46,7 +46,7 @@ android {
     }
 
     val resolvedVersionName = if (hasVersionNameInput) {
-        val trimmedName = rawVersionName!!.trim()
+        val trimmedName = rawVersionName!!.trim().removePrefix("v")
         if (!Regex("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$").matches(trimmedName)) {
             throw GradleException(
                 "Invalid injected Android versionName '$trimmedName': must be a stable semantic version X.Y.Z."
