@@ -489,4 +489,58 @@ class TurnOrchestratorTest {
         assertEquals(1, queue.size())
         assertEquals("是", queue.pending().single().option)
     }
+
+    @Test
+    fun museRoutePreservesRouteAndConversationId() {
+        val o = TurnOrchestrator(
+            TurnOrchestrator.Config(modelRoutingEnabled = false),
+            RuleRouter(), null, LocalToolExecutor(platform, weather), ctx,
+            cloud = { req ->
+                Result.success(
+                    com.voicekiosk.app.conversation.CloudReply(
+                        reply = "好，我去问问 Muse，稍等一下。",
+                        route = "muse",
+                        conversationId = "conv-abc-123"
+                    )
+                )
+            }
+        )
+        val res = o.handle("安安下周有什么安排")
+        assertEquals(TurnSource.CLOUD, res.source)
+        assertEquals("好，我去问问 Muse，稍等一下。", res.reply)
+        assertEquals("muse", res.route)
+        assertEquals("conv-abc-123", res.conversationId)
+    }
+
+    @Test
+    fun toolFallbackPreservesRouteAndConversationId() {
+        platform.mediaOk = false
+        val o = TurnOrchestrator(
+            TurnOrchestrator.Config(modelRoutingEnabled = false),
+            RuleRouter(), null, LocalToolExecutor(platform, weather), ctx,
+            cloud = { req ->
+                Result.success(
+                    com.voicekiosk.app.conversation.CloudReply(
+                        reply = "好，我去问问 Muse，稍等一下。",
+                        route = "muse",
+                        conversationId = "conv-tool-fallback"
+                    )
+                )
+            }
+        )
+        val res = o.handle("下一首")
+        assertEquals(TurnSource.CLOUD, res.source)
+        assertEquals("muse", res.route)
+        assertEquals("conv-tool-fallback", res.conversationId)
+    }
+
+    @Test
+    fun conversationContextUpdateLastReply() {
+        val c = ConversationContext()
+        c.record("问题1", "等待中", TurnSource.CLOUD, null)
+        assertEquals("等待中", c.turns().last().reply)
+        c.updateLastReply("最终答案")
+        assertEquals("最终答案", c.turns().last().reply)
+        assertEquals("问题1", c.turns().last().userText)
+    }
 }

@@ -875,6 +875,19 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         webView.evaluateJavascript("if (typeof onChatReply === 'function') onChatReply('$escaped');", null)
     }
 
+    override fun onWaitingForMuse(statusText: String) {
+        Log.i(TAG, "UI received waiting for muse event: '$statusText'")
+        isConversationActive = true
+        if (::petAvatarView.isInitialized) {
+            petAvatarView.setPetState(PetAvatarView.PetState.THINKING)
+        }
+        showBanner("等待回复中...", "#D97706", "#FBBF24")
+        showReplyCard(statusText, isError = false)
+        val escaped = escapeJs(statusText)
+        webView.evaluateJavascript("if (typeof onWaitingForMuse === 'function') onWaitingForMuse('$escaped');", null)
+        mainHandler.removeCallbacks(resetWakeStateRunnable)
+    }
+
     override fun onFocusBoard(boardId: String) {
         Log.i(TAG, "UI received focus board event: '$boardId'")
         val escaped = escapeJs(boardId)

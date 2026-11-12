@@ -45,6 +45,31 @@ class ConversationWireTest {
     }
 
     @Test
+    fun conversationWirePathsAndStatusParsing() {
+        assertEquals("/api/v1/conversations/", ConversationWire.CONVERSATIONS_PATH)
+        assertEquals("/api/v1/conversations/c-456", ConversationWire.conversationsPath("c-456"))
+        assertEquals("http://192.168.0.202:8093/api/v1/conversations/c-789", ConversationPoller.conversationUrl("http://192.168.0.202:8093", "c-789"))
+
+        val pendingJson = JSONObject("""{"id":"c-1","status":"pending","reply":""}""")
+        val pending = ConversationWire.parseConversationStatus(pendingJson)
+        assertEquals("c-1", pending.id)
+        assertEquals("pending", pending.status)
+        assertEquals("", pending.reply)
+
+        val answeredJson = JSONObject("""{"id":"c-1","status":"answered","reply":"安安下周有比赛"}""")
+        val answered = ConversationWire.parseConversationStatus(answeredJson)
+        assertEquals("c-1", answered.id)
+        assertEquals("answered", answered.status)
+        assertEquals("安安下周有比赛", answered.reply)
+
+        val timedOutJson = JSONObject("""{"id":"c-2","status":"timed_out","reply":"Muse 现在没回，稍后再试"}""")
+        val timedOut = ConversationWire.parseConversationStatus(timedOutJson)
+        assertEquals("c-2", timedOut.id)
+        assertEquals("timed_out", timedOut.status)
+        assertEquals("Muse 现在没回，稍后再试", timedOut.reply)
+    }
+
+    @Test
     fun errorEnvelope401And403IsUnpaired() {
         val body401 = """{"detail":"Missing Authorization header"}"""
         assertEquals(ErrorEnvelope.UNPAIRED_MESSAGE, ErrorEnvelope.userMessage(401, body401))

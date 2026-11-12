@@ -36,6 +36,8 @@ import com.voicekiosk.app.bridge.ErrorEnvelope
 import com.voicekiosk.app.conversation.AnswerQueue
 import com.voicekiosk.app.conversation.CloudReply
 import com.voicekiosk.app.conversation.ConversationContext
+import com.voicekiosk.app.conversation.ConversationPoller
+import com.voicekiosk.app.conversation.ConversationRecord
 import com.voicekiosk.app.conversation.ConversationWire
 import com.voicekiosk.app.conversation.OpenApproval
 import com.voicekiosk.app.conversation.OpenQuestion
@@ -79,13 +81,15 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
     enum class PipelineState {
         KWS_LISTENING,
         ASR_LISTENING,
-        SPEAKING
+        SPEAKING,
+        WAITING
     }
 
     private enum class TurnOutcome {
         ANSWERED,
         SILENCE,
-        ERROR
+        ERROR,
+        COMPLETED
     }
 
     companion object {
@@ -952,6 +956,15 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
             val cloud = chatResult.getOrNull()
             val reply = cloud?.reply.orEmpty().trim()
             if (reply.isNotEmpty()) {
+                if (cloud?.route == "muse" && !cloud.conversationId.isNullOrEmpty()) {
+                    return handleMuseWaitingTurn(
+                        record = record,
+                        shortBuffer = shortBuffer,
+                        ackReply = reply,
+                        conversationId = cloud.conversationId,
+                        speakAck = cloud.speak
+                    )
+                }
                 WakeWordEventBus.emitChatReply(reply)
                 if (cloud?.speak != false) speakBlocking(reply)
                 // Drain 150ms of residual speaker echo before next turn or KWS
@@ -1099,13 +1112,23 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         if (result == null) {
             // Same handling as the plain cloud path.
             val r = postChat(com.voicekiosk.app.conversation.CloudRequest(recognizedText))
-            val reply = r.getOrNull()?.reply.orEmpty().trim()
+            val cloud = r.getOrNull()
+            val reply = cloud?.reply.orEmpty().trim()
             if (reply.isEmpty()) {
                 WakeWordEventBus.emitChatOfflineError(r.exceptionOrNull()?.message ?: "服务未返回有效回答")
                 return TurnOutcome.ERROR
             }
+            if (cloud?.route == "muse" && !cloud.conversationId.isNullOrEmpty()) {
+                return handleMuseWaitingTurn(
+                    record = record,
+                    shortBuffer = shortBuffer,
+                    ackReply = reply,
+                    conversationId = cloud.conversationId,
+                    speakAck = cloud.speak
+                )
+            }
             WakeWordEventBus.emitChatReply(reply)
-            if (r.getOrNull()?.speak != false) speakBlocking(reply)
+            if (cloud?.speak != false) speakBlocking(reply)
             drainAudioSamples(record, shortBuffer, 150L)
             return TurnOutcome.ANSWERED
         }
@@ -1127,11 +1150,110 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
             return TurnOutcome.ERROR
         }
         val shown = if (routeDebug) "$reply\n〔${result.source.label} · L0 ${t.ruleMs}ms · L1 ${t.modelStatus}${if (t.modelMs > 0) " ${t.modelMs}ms" else ""} · 共 ${t.totalMs}ms〕" else reply
+        if (result.source == com.voicekiosk.app.conversation.TurnSource.CLOUD &&
+            result.route == "muse" &&
+            !result.conversationId.isNullOrEmpty()) {
+            return handleMuseWaitingTurn(
+                record = record,
+                shortBuffer = shortBuffer,
+                ackReply = shown,
+                conversationId = result.conversationId,
+                speakAck = lastCloudSpeak
+            )
+        }
         WakeWordEventBus.emitChatReply(shown)
         val skipTts = result.source == com.voicekiosk.app.conversation.TurnSource.CLOUD && !lastCloudSpeak
         if (!skipTts) speakBlocking(reply)
         drainAudioSamples(record, shortBuffer, 150L)
         return TurnOutcome.ANSWERED
+    }
+
+    /**
+     * Handles the two-stage reply and waiting state for Muse async queue routes.
+     * Speaks the initial ack prompt, enters the waiting state displaying an indicator on screen,
+     * and polls GET /api/v1/conversations/{conversation_id} every 3 seconds on this background
+     * thread until answered, timed out, or 2 minutes elapse.
+     */
+    private fun handleMuseWaitingTurn(
+        record: AudioRecord,
+        shortBuffer: ShortArray,
+        ackReply: String,
+        conversationId: String,
+        speakAck: Boolean
+    ): TurnOutcome {
+        WakeWordEventBus.emitChatReply(ackReply)
+        if (speakAck) {
+            speakBlocking(ackReply)
+        }
+        drainAudioSamples(record, shortBuffer, 150L)
+
+        Log.i(TAG, "Entering waiting state for Muse conversation_id=$conversationId")
+        pipelineState = PipelineState.WAITING
+        WakeWordEventBus.emitStateChanged(pipelineState.name)
+        val waitingText = "等待 Muse 回复中"
+        WakeWordEventBus.emitWaitingForMuse(waitingText)
+        WakeWordEventBus.emitChatReply(waitingText)
+
+        // Important design decision: The Android app has no WebSocket client (there is no WebSocket code
+        // anywhere in android/). Rather than adding a WebSocket dependency, HTTP polling of
+        // GET /api/v1/conversations/{conversation_id} with the device token as Bearer auth is used.
+        // This reuses the existing HttpURLConnection code and is simpler and more reliable than
+        // adding a new WebSocket dependency.
+        val baseUrl = AppConfig.getBridgeUrl(applicationContext)
+        val token = AppConfig.getDeviceToken(applicationContext)
+        val startTime = System.currentTimeMillis()
+        var finalReply: String? = null
+        var answeredOrTimedOut = false
+
+        while (isRecording && (System.currentTimeMillis() - startTime) < ConversationPoller.MAX_WAIT_MS) {
+            val pollSleepEnd = System.currentTimeMillis() + ConversationPoller.POLL_INTERVAL_MS
+            while (isRecording && System.currentTimeMillis() < pollSleepEnd) {
+                record.read(shortBuffer, 0, shortBuffer.size)
+                try {
+                    Thread.sleep(50L)
+                } catch (_: InterruptedException) {
+                    break
+                }
+            }
+            if (!isRecording) break
+
+            val pollResult = ConversationPoller.fetchConversation(baseUrl, token, conversationId)
+            if (pollResult.isSuccess) {
+                val recordStatus = pollResult.getOrNull()
+                val status = recordStatus?.status.orEmpty()
+                Log.i(TAG, "Polled conversation $conversationId: status=$status")
+                if (status == ConversationPoller.STATUS_ANSWERED) {
+                    finalReply = recordStatus?.reply.orEmpty().trim().ifEmpty {
+                        "Muse 已回复"
+                    }
+                    answeredOrTimedOut = true
+                    break
+                } else if (status == ConversationPoller.STATUS_TIMED_OUT) {
+                    finalReply = recordStatus?.reply.orEmpty().trim().ifEmpty {
+                        ConversationPoller.FALLBACK_TIMEOUT_REPLY
+                    }
+                    answeredOrTimedOut = true
+                    break
+                }
+            } else {
+                Log.w(TAG, "Poll conversation $conversationId failed: ${pollResult.exceptionOrNull()?.message}; retrying next tick")
+            }
+        }
+
+        if (!answeredOrTimedOut) {
+            Log.w(TAG, "Waiting for Muse conversation $conversationId timed out after 2 minutes")
+            finalReply = ConversationPoller.FALLBACK_TIMEOUT_REPLY
+        }
+
+        val toSpeak = finalReply ?: ConversationPoller.FALLBACK_TIMEOUT_REPLY
+        orchestrator?.context?.updateLastReply(toSpeak)
+        pipelineState = PipelineState.SPEAKING
+        WakeWordEventBus.emitStateChanged(pipelineState.name)
+        WakeWordEventBus.emitChatReply(toSpeak)
+        speakBlocking(toSpeak)
+        drainAudioSamples(record, shortBuffer, 150L)
+
+        return TurnOutcome.COMPLETED
     }
 
     /** Timer done: wait (up to ~1 min) until no conversation is running, then beep + speak. */

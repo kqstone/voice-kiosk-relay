@@ -64,6 +64,15 @@ class ConversationContext(
         return t
     }
 
+    /** Updates the reply text of the most recent turn (e.g. when Muse async answer arrives). */
+    @Synchronized
+    fun updateLastReply(reply: String) {
+        if (turns.isNotEmpty()) {
+            val last = turns.removeLast()
+            turns.addLast(last.copy(reply = reply))
+        }
+    }
+
     /** Decision of the most recent turn, if any (null after expiry / reset). */
     @Synchronized
     fun lastDecision(): RouteDecision? {

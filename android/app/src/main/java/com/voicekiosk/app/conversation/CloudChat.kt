@@ -35,9 +35,13 @@ data class CloudReply(
     constructor(reply: String, ackedIds: List<String>?) : this(reply = reply)
 }
 
-/** JSON wire codec for POST /api/v1/chat. */
+/** JSON wire codec for POST /api/v1/chat and GET /api/v1/conversations/{conversation_id}. */
 object ConversationWire {
     const val PATH = "/api/v1/chat"
+    const val CONVERSATIONS_PATH = "/api/v1/conversations/"
+
+    fun conversationsPath(conversationId: String): String =
+        "/api/v1/conversations/$conversationId"
 
     fun requestJson(
         req: CloudRequest,
@@ -68,6 +72,13 @@ object ConversationWire {
             conversationId = convId,
             speak = speak
         )
+    }
+
+    fun parseConversationStatus(json: JSONObject): ConversationRecord {
+        val id = json.optString("id", "").trim()
+        val status = json.optString("status", "").trim()
+        val reply = json.optString("reply", "").trim()
+        return ConversationRecord(id = id, status = status, reply = reply)
     }
 }
 

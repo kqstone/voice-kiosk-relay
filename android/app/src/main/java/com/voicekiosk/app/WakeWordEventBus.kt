@@ -21,6 +21,7 @@ object WakeWordEventBus {
         fun onAudioEnergy(energy: Float) {}
         fun onFocusBoard(boardId: String) {}
         fun onBridgeNotice(text: String) {}
+        fun onWaitingForMuse(statusText: String) {}
         /** Native PIN pad for a pending approval (`kind` is approve or reject). */
         fun onRequestPin(requestId: String, kind: String) {}
     }
@@ -84,6 +85,14 @@ object WakeWordEventBus {
         mainHandler.post {
             synchronized(this) {
                 listeners.forEach { it.onChatReply(replyText) }
+            }
+        }
+    }
+
+    fun emitWaitingForMuse(statusText: String) {
+        mainHandler.post {
+            synchronized(this) {
+                listeners.forEach { it.onWaitingForMuse(statusText) }
             }
         }
     }

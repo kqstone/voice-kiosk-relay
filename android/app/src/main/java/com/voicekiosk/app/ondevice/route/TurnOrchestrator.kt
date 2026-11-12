@@ -128,13 +128,17 @@ class TurnOrchestrator(
     /**
      * @property reply text to speak (null on error)
      * @property error cloud failure message (offline notice; nothing is spoken)
+     * @property route chosen route from bridge ("local" or "muse")
+     * @property conversationId bridge conversation id for async Muse routes, if any
      */
     data class TurnResult(
         val reply: String?,
         val error: String?,
         val source: TurnSource,
         val decision: RouteDecision?,
-        val trace: Trace
+        val trace: Trace,
+        val route: String = "local",
+        val conversationId: String? = null
     ) {
         val isSuccess: Boolean get() = reply != null
     }
@@ -214,9 +218,9 @@ class TurnOrchestrator(
     }
 
     private fun handleTurn(text: String, t0: Long): TurnResult {
-        var spec: Future<Result<String>>? = null
+        var spec: Future<Result<CloudReply>>? = null
         val p = plan(text) {
-            if (config.speculativeCloud) spec = try { cloudExecutor.submit<Result<String>> { callCloud(text) } } catch (e: Exception) { null }
+            if (config.speculativeCloud) spec = try { cloudExecutor.submit<Result<CloudReply>> { callCloud(text) } } catch (e: Exception) { null }
         }
         val s = spec
         val r = if (s == null) execute(text, p) else executeSpeculative(text, p, s)
@@ -224,8 +228,8 @@ class TurnOrchestrator(
     }
 
     /** With a speculative cloud request in flight: use it for any cloud outcome, discard it otherwise. */
-    private fun executeSpeculative(text: String, p: Plan, spec: Future<Result<String>>): TurnResult {
-        val await = { try { spec.get() } catch (e: Exception) { Result.failure<String>(e.cause ?: e) } }
+    private fun executeSpeculative(text: String, p: Plan, spec: Future<Result<CloudReply>>): TurnResult {
+        val await = { try { spec.get() } catch (e: Exception) { Result.failure<CloudReply>(e.cause ?: e) } }
         return when (p) {
             is Plan.Cloud -> cloudTurn(text, p.decision, p.trace, await())
             is Plan.LocalTool -> runTool(text, p)?.let { r ->
@@ -353,7 +357,7 @@ class TurnOrchestrator(
      * resending would not help and could reorder history.
      * On failure they stay pending and go out again next time (the bridge dedupes by id).
      */
-    private fun callCloud(text: String): Result<String> {
+    private fun callCloud(text: String): Result<CloudReply> {
         val allPending = context.unsyncedLocalTurns()
         val sent = allPending.takeLast(ConversationContext.MAX_PENDING_SENT)
         val resetFirst = context.bridgeResetPending
@@ -364,19 +368,28 @@ class TurnOrchestrator(
             val acked = reply.ackedIds
             if (sent.isNotEmpty()) log("local_turns sent ${sent.size}, acked ${acked?.size ?: "n/a"}")
         }
-        return r.map { it.reply }
+        return r
     }
 
-    private fun cloudTurn(text: String, d: RouteDecision?, trace: Trace, already: Result<String>? = null): TurnResult {
+    private fun cloudTurn(text: String, d: RouteDecision?, trace: Trace, already: Result<CloudReply>? = null): TurnResult {
         val r = already ?: callCloud(text)
-        val reply = r.getOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+        val cloudReply = r.getOrNull()
+        val reply = cloudReply?.reply?.trim()?.takeIf { it.isNotEmpty() }
         if (reply == null) {
             return TurnResult(null, r.exceptionOrNull()?.message ?: "服务未返回有效回答", TurnSource.CLOUD, d, trace)
         }
         // Keep the classified intent (if any) so ellipsis after a cloud turn ("那明天呢"
         // after a weather answer that had to go to the cloud) still has its state.
         context.record(text, reply, TurnSource.CLOUD, d)
-        return TurnResult(reply, null, TurnSource.CLOUD, d, trace)
+        return TurnResult(
+            reply = reply,
+            error = null,
+            source = TurnSource.CLOUD,
+            decision = d,
+            trace = trace,
+            route = cloudReply.route,
+            conversationId = cloudReply.conversationId
+        )
     }
 
     companion object {
