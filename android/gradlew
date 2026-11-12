@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+
+#
+# Copyright 2015 the original author or authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# ...
+#
+
+set -e
+
+APP_BASE_NAME=`basename "$0"`
+APP_HOME="`cd "\`dirname "$0"\`" >/dev/null 2>&1 && pwd`"
+
+# Determine the Java command to use to start the JVM.
+if [ -n "$JAVA_HOME" ] ; then
+    if [ -x "$JAVA_HOME/jre/sh/java" ] ; then
+        JAVACMD="$JAVA_HOME/jre/sh/java"
+    else
+        JAVACMD="$JAVA_HOME/bin/java"
+    fi
+else
+    JAVACMD="java"
+fi
+
+CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
+
+# Fallback: if gradle is installed locally and wrapper jar is absent, invoke gradle
+if [ ! -f "$CLASSPATH" ] && command -v gradle >/dev/null 2>&1 ; then
+    exec gradle "$@"
+fi
+
+# Download gradle-wrapper.jar if missing
+if [ ! -f "$CLASSPATH" ] ; then
+    mkdir -p "$APP_HOME/gradle/wrapper"
+    echo "Downloading gradle-wrapper.jar..."
+    WRAPPER_URL="https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/gradle-wrapper.jar"
+    if command -v curl >/dev/null 2>&1 ; then
+        curl -sSL "$WRAPPER_URL" -o "$CLASSPATH" || true
+    elif command -v wget >/dev/null 2>&1 ; then
+        wget -q "$WRAPPER_URL" -O "$CLASSPATH" || true
+    fi
+fi
+
+if [ ! -f "$CLASSPATH" ] ; then
+    if command -v gradle >/dev/null 2>&1 ; then
+        exec gradle "$@"
+    else
+        echo "Error: gradle-wrapper.jar not found and gradle not in PATH." >&2
+        exit 1
+    fi
+fi
+
+exec "$JAVACMD" "-Dorg.gradle.appname=$APP_BASE_NAME" -classpath "$CLASSPATH" org.gradle.wrapper.GradleWrapperMain "$@"

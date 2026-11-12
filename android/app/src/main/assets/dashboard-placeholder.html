@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Voice Kiosk Dashboard</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body {
+            background-color: #000000;
+            color: #E2E8F0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            height: 100vh;
+            width: 100vw;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            transition: background-color 0.4s ease, color 0.4s ease;
+        }
+
+        /* Container that shifts periodically for OLED burn-in protection */
+        #burnin-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            padding-top: 9vh;
+            text-align: center;
+            padding-left: 20px;
+            padding-right: 20px;
+            transition: transform 1.2s cubic-bezier(0.4, 0, 0.2, 1);
+            will-change: transform;
+            max-width: 90vw;
+            width: 100%;
+        }
+
+        .time-box {
+            font-size: 5.2rem;
+            font-weight: 300;
+            letter-spacing: 2px;
+            color: #F8FAFC;
+            font-variant-numeric: tabular-nums;
+            line-height: 1.1;
+            text-shadow: 0 0 20px rgba(56, 189, 248, 0.25);
+            transition: color 0.4s ease, text-shadow 0.4s ease;
+        }
+
+        .seconds {
+            font-size: 2.2rem;
+            opacity: 0.65;
+            font-weight: 300;
+            margin-left: 4px;
+            transition: opacity 0.4s ease;
+        }
+
+        .date-box {
+            font-size: 1.35rem;
+            color: #94A3B8;
+            margin-top: 10px;
+            font-weight: 400;
+            letter-spacing: 1px;
+            transition: color 0.4s ease;
+        }
+
+        /* Weather Badge */
+        .weather-box {
+            display: none; /* Hidden by default until weather is provided */
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 10px;
+            font-size: 1.05rem;
+            color: #94A3B8;
+            background: rgba(30, 41, 59, 0.45);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            border-radius: 9999px;
+            padding: 5px 16px;
+            letter-spacing: 0.5px;
+            transition: color 0.4s ease, border-color 0.4s ease, background 0.4s ease;
+        }
+
+        .divider {
+            width: 50px;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #38BDF8, transparent);
+            margin: 20px 0;
+            transition: opacity 0.4s ease;
+        }
+
+        .status-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            border-radius: 9999px;
+            padding: 8px 20px;
+            font-size: 0.95rem;
+            color: #CBD5E1;
+            box-shadow: 0 0 16px rgba(56, 189, 248, 0.12);
+            transition: all 0.4s ease;
+        }
+
+        .status-container.listening {
+            background: rgba(16, 185, 129, 0.2);
+            border-color: rgba(16, 185, 129, 0.8);
+            box-shadow: 0 0 25px rgba(16, 185, 129, 0.4);
+            transform: scale(1.03);
+            color: #A7F3D0;
+        }
+
+        .status-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background-color: #38BDF8;
+            box-shadow: 0 0 10px #38BDF8;
+            transition: all 0.3s ease;
+        }
+
+        .status-container.listening .status-dot {
+            background-color: #10B981;
+            box-shadow: 0 0 14px #10B981;
+            animation: pulse-dot 1s infinite;
+        }
+
+        /* AOD Mode (Standby) Visual States */
+        body.aod-mode .time-box {
+            color: #CBD5E1;
+            text-shadow: none;
+        }
+
+        body.aod-mode .seconds {
+            opacity: 0.45;
+        }
+
+        body.aod-mode .date-box {
+            color: #64748B;
+        }
+
+        body.aod-mode .weather-box {
+            color: #64748B;
+            background: rgba(15, 23, 42, 0.2);
+            border-color: rgba(100, 116, 139, 0.2);
+        }
+
+        body.aod-mode .divider {
+            opacity: 0.25;
+        }
+
+        body.aod-mode .status-container {
+            opacity: 0.35;
+            box-shadow: none;
+            border-color: rgba(100, 116, 139, 0.2);
+            background: rgba(15, 23, 42, 0.3);
+        }
+
+        body.aod-mode .footer-note {
+            opacity: 0.25;
+        }
+
+        .footer-note {
+            position: absolute;
+            bottom: 16px;
+            font-size: 0.75rem;
+            color: #475569;
+            letter-spacing: 0.5px;
+            transition: opacity 0.4s ease;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.4); opacity: 0.7; }
+        }
+    </style>
+</head>
+<body class="aod-mode">
+    <div id="burnin-container">
+        <div class="time-box">
+            <span id="hours-minutes">00:00</span><span class="seconds" id="seconds">:00</span>
+        </div>
+        <div class="date-box" id="full-date">----年--月--日 星期-</div>
+        <div class="weather-box" id="weather-box"></div>
+
+        <div class="divider"></div>
+
+        <div class="status-container" id="status-card">
+            <div class="status-dot" id="status-indicator"></div>
+            <span id="status-text">Voice Kiosk 就绪 · 等待唤醒</span>
+        </div>
+    </div>
+
+    <div class="footer-note" id="burnin-note">OLED 防烧屏保护已激活</div>
+
+    <script>
+        // Clock updater
+        function updateClock() {
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            
+            document.getElementById('hours-minutes').textContent = `${hours}:${minutes}`;
+            document.getElementById('seconds').textContent = `:${seconds}`;
+
+            const days = ['日', '一', '二', '三', '四', '五', '六'];
+            const year = now.getFullYear();
+            const month = now.getMonth() + 1;
+            const date = now.getDate();
+            const dayStr = days[now.getDay()];
+            document.getElementById('full-date').textContent = `${year}年${month}月${date}日 星期${dayStr}`;
+        }
+        setInterval(updateClock, 500);
+        updateClock();
+
+        // OLED Burn-in Protection: shift position slightly every 60s
+        let shiftIndex = 0;
+        const offsets = [
+            { x: 0, y: 0 },
+            { x: 6, y: -5 },
+            { x: -7, y: 6 },
+            { x: 8, y: 7 },
+            { x: -6, y: -6 },
+            { x: 5, y: 8 },
+            { x: -8, y: -4 },
+            { x: 4, y: -7 }
+        ];
+
+        function shiftElementsForBurnIn() {
+            shiftIndex = (shiftIndex + 1) % offsets.length;
+            const offset = offsets[shiftIndex];
+            const container = document.getElementById('burnin-container');
+            if (container) {
+                container.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
+            }
+        }
+        setInterval(shiftElementsForBurnIn, 60000);
+
+        // Weather integration callback
+        window.onWeatherUpdated = function(weatherLine) {
+            const weatherBox = document.getElementById('weather-box');
+            if (!weatherBox) return;
+            if (weatherLine && weatherLine.trim().length > 0) {
+                weatherBox.textContent = weatherLine.trim();
+                weatherBox.style.display = 'inline-flex';
+            } else {
+                weatherBox.textContent = '';
+                weatherBox.style.display = 'none';
+            }
+        };
+
+        // AOD Mode callback: toggles body.aod-mode
+        window.onAodModeChanged = function(isAod) {
+            document.body.classList.toggle('aod-mode', !!isAod);
+        };
+
+        // Wake word callback
+        window.onWakeWord = function(keyword) {
+            const statusCard = document.getElementById('status-card');
+            const statusText = document.getElementById('status-text');
+            if (statusCard) statusCard.classList.add('listening');
+            if (statusText) statusText.textContent = `已唤醒：${keyword || '你好小智'}`;
+        };
+
+        window.onAsrDownloadProgress = function(percent, message) {
+            const statusText = document.getElementById('status-text');
+            if (statusText) {
+                statusText.textContent = message || `正在下载语音识别模型 (${percent}%)`;
+            }
+        };
+
+        window.onAsrPartial = function(text) {
+            const statusText = document.getElementById('status-text');
+            if (statusText && text) {
+                statusText.textContent = `正在识别：${text}`;
+            }
+        };
+
+        window.onAsrFinal = function(text) {
+            const statusText = document.getElementById('status-text');
+            if (statusText) {
+                statusText.textContent = text ? '正在思考中...' : '未听清，请重试';
+            }
+        };
+
+        window.onChatReply = function(reply) {
+            const statusText = document.getElementById('status-text');
+            if (statusText) statusText.textContent = '正在回答...';
+        };
+
+        window.onChatOffline = function(errMsg) {
+            const statusCard = document.getElementById('status-card');
+            const statusText = document.getElementById('status-text');
+            if (statusCard) statusCard.classList.remove('listening');
+            if (statusText) statusText.textContent = `离线提示：${errMsg || '网络不可用'}`;
+        };
+
+        window.onFollowUpListening = function(turnIndex) {
+            const statusCard = document.getElementById('status-card');
+            const statusText = document.getElementById('status-text');
+            if (statusCard) statusCard.classList.add('listening');
+            if (statusText) statusText.textContent = '连续对话中 · 请继续说话';
+        };
+
+        window.onPipelineStateChanged = function(state) {
+            const statusCard = document.getElementById('status-card');
+            const statusText = document.getElementById('status-text');
+            if (!statusCard || !statusText) return;
+            if (state === 'KWS_LISTENING') {
+                statusCard.classList.remove('listening');
+                statusText.textContent = 'Voice Kiosk 就绪 · 等待唤醒';
+            } else if (state === 'ASR_LISTENING') {
+                statusCard.classList.add('listening');
+                statusText.textContent = '正在听您说话...';
+            } else if (state === 'SPEAKING') {
+                statusText.textContent = '正在回答...';
+            }
+        };
+
+        window.onNetworkStateChanged = function(online) {
+            const statusText = document.getElementById('status-text');
+            if (!statusText) return;
+            if (!online) {
+                statusText.textContent = '离线模式 · 本地唤醒可用';
+            } else {
+                statusText.textContent = 'Voice Kiosk 就绪 · 等待唤醒';
+            }
+        };
+
+        window.onBridgeNotice = function(text) {
+            const statusText = document.getElementById('status-text');
+            if (!statusText) return;
+            if (text) {
+                statusText.textContent = String(text);
+            }
+        };
+    </script>
+</body>
+</html>

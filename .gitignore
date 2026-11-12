@@ -1,0 +1,31 @@
+# Gradle and Android
+.gradle/
+build/
+/*/build/
+local.properties
+*.apk
+*.aab
+.idea/
+*.iml
+.cxx/
+.externalNativeBuild/
+
+# Python and FastAPI
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+data/
+
+# OS and Editors
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
