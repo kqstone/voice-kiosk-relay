@@ -1,0 +1,15 @@
+services:
+  relay-bridge:
+    build: .
+    container_name: relay-bridge
+    restart: unless-stopped
+    ports:
+      - "8093:8093"
+    environment:
+      - DATA_DIR=/app/data
+      - PORT=8093
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./data:/app/data
