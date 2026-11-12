@@ -15,6 +15,8 @@ from app.llm import (
     format_board_summary,
     llm_client,
 )
+from app.queue import conversation_queue
+from app.router import route_question
 from app.storage import board_storage, routing_config_storage
 
 app = FastAPI(title="Voice Kiosk Relay Bridge", version="0.1.0")
@@ -34,6 +36,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     route: str = "local"
+    conversation_id: str | None = None
 
 
 class MuseKeywordItem(BaseModel):
@@ -51,6 +54,39 @@ class RoutingConfigRequest(BaseModel):
 class RoutingConfigResponse(BaseModel):
     ok: bool = True
     version: int
+
+
+class CreateConversationRequest(BaseModel):
+    text: str
+    session_id: str | None = None
+    keywords: list[str] = []
+    reason: str = ""
+
+
+class CreateConversationResponse(BaseModel):
+    conversation_id: str
+    status: str = "pending"
+
+
+class ReplyConversationRequest(BaseModel):
+    reply: str
+
+
+ACK_TEMPLATES: list[str] = [
+    "好，我去问问 Muse，稍等一下。",
+    "正在问，稍等。",
+    "这个问题我问问 Muse，马上回来。",
+    "稍等，我去问问 Muse。",
+]
+
+_ack_index: int = 0
+
+
+def get_next_ack() -> str:
+    global _ack_index
+    msg = ACK_TEMPLATES[_ack_index % len(ACK_TEMPLATES)]
+    _ack_index += 1
+    return msg
 
 
 class ConnectionManager:
@@ -93,12 +129,29 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse:
             detail="Text cannot be empty",
         )
 
+    clean_text = payload.text.strip()
+    keyword_config = routing_config_storage.get_config()
+    route_decision = await route_question(clean_text, keyword_config=keyword_config)
+    decision_route = route_decision.get("route", "local")
+
+    if decision_route == "muse":
+        keywords = route_decision.get("keywords", [])
+        reason = route_decision.get("reason", "")
+        conv_id = conversation_queue.create(
+            text=clean_text,
+            session_id=payload.session_id,
+            keywords=keywords,
+            reason=reason,
+        )
+        ack = get_next_ack()
+        return ChatResponse(reply=ack, route="muse", conversation_id=conv_id)
+
     boards_summary = format_board_summary(board_storage)
     system_prompt = build_chat_system_prompt(boards_summary)
 
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": payload.text.strip()},
+        {"role": "user", "content": clean_text},
     ]
 
     try:
@@ -115,6 +168,79 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse:
         )
 
     return ChatResponse(reply=reply, route="local")
+
+
+@app.post(
+    "/api/v1/conversations",
+    response_model=CreateConversationResponse,
+    dependencies=[Depends(verify_device_or_push_token)],
+)
+def create_conversation(
+    payload: CreateConversationRequest,
+) -> CreateConversationResponse:
+    if not payload.text or not payload.text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Text cannot be empty",
+        )
+    conv_id = conversation_queue.create(
+        text=payload.text.strip(),
+        session_id=payload.session_id,
+        keywords=payload.keywords,
+        reason=payload.reason,
+    )
+    return CreateConversationResponse(conversation_id=conv_id, status="pending")
+
+
+@app.get(
+    "/api/v1/conversations/pending",
+    dependencies=[Depends(verify_device_or_push_token)],
+)
+def list_pending_conversations() -> list[dict[str, Any]]:
+    return conversation_queue.list_pending()
+
+
+@app.get(
+    "/api/v1/conversations/{conversation_id}",
+    dependencies=[Depends(verify_device_or_push_token)],
+)
+def get_conversation(conversation_id: str) -> dict[str, Any]:
+    conv = conversation_queue.get(conversation_id)
+    if conv is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation '{conversation_id}' not found",
+        )
+    return conv
+
+
+@app.post(
+    "/api/v1/conversations/{conversation_id}/reply",
+    dependencies=[Depends(verify_push_token)],
+)
+async def reply_conversation(
+    conversation_id: str,
+    payload: ReplyConversationRequest,
+) -> dict[str, Any]:
+    existing = conversation_queue.get(conversation_id, auto_timeout=False)
+    if existing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation '{conversation_id}' not found",
+        )
+    updated = conversation_queue.reply(conversation_id, payload.reply)
+    session_id = (
+        updated.get("session_id", "")
+        if updated
+        else existing.get("session_id", "")
+    )
+    await manager.broadcast({
+        "type": "conversation_reply",
+        "conversation_id": conversation_id,
+        "session_id": session_id,
+        "reply": payload.reply,
+    })
+    return {"ok": True, "status": "answered"}
 
 
 @app.post("/api/v1/push/{board_id}", dependencies=[Depends(verify_push_token)])

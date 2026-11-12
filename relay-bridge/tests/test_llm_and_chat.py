@@ -159,9 +159,14 @@ class TestChatEndpoint(unittest.TestCase):
         settings.push_token = "valid-push-token-1234"
         settings.device_token = "valid-device-token-5678"
 
+        self.route_patcher = patch("app.main.route_question", new_callable=AsyncMock)
+        self.mock_route = self.route_patcher.start()
+        self.mock_route.return_value = {"keywords": [], "route": "local", "reason": "local"}
+
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
+        self.route_patcher.stop()
         board_storage.base_dir = self.orig_base_dir
         board_storage.boards_dir = self.orig_boards_dir
         settings.push_token = self.orig_push
