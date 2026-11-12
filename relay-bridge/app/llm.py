@@ -85,11 +85,18 @@ def format_board_summary(storage: BoardStorage) -> str:
     if not board_ids:
         return "当前无看板数据。"
 
-    # Ensure anan_homework is prioritized first if present
-    sorted_ids = sorted(
-        board_ids,
-        key=lambda x: (0 if x == "anan_homework" else 1, x),
-    )
+    # Sort boards by recency: newest updated_at (or timestamp fallback) first;
+    # boards with no usable timestamp sort last.
+    def _board_ts(bid: str) -> str:
+        board = storage.get_board(bid)
+        if not board:
+            return ""
+        return board.get("updated_at") or board.get("timestamp") or ""
+
+    with_ts = [bid for bid in board_ids if _board_ts(bid)]
+    without_ts = [bid for bid in board_ids if not _board_ts(bid)]
+    with_ts.sort(key=_board_ts, reverse=True)  # newest ISO-8601 string first
+    sorted_ids = with_ts + without_ts
 
     summaries: list[str] = []
     for bid in sorted_ids:

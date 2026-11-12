@@ -125,9 +125,42 @@ class TestBoardSummaryAndPrompt(unittest.TestCase):
         self.assertIn("安安今日作业", summary)
         self.assertIn("数学口算", summary)
         self.assertIn("语文背诵", summary)
+        # anan_homework was saved last so it has a newer timestamp and should appear first
         anan_pos = summary.find("anan_homework")
         other_pos = summary.find("other_board")
         self.assertTrue(anan_pos < other_pos)
+
+    def test_newer_board_appears_first_regardless_of_id(self) -> None:
+        """A board with a newer updated_at must come first, no matter what its ID is."""
+        import time
+
+        self.storage.save_board(board_id="alpha_board", data={"title": "Alpha"})
+        # Give storage a moment so timestamps differ (storage uses datetime.now()).
+        time.sleep(0.01)
+        self.storage.save_board(board_id="zebra_board", data={"title": "Zebra"})
+
+        summary = format_board_summary(self.storage)
+        # zebra_board was saved later → newer timestamp → must appear first
+        alpha_pos = summary.find("alpha_board")
+        zebra_pos = summary.find("zebra_board")
+        self.assertGreater(alpha_pos, zebra_pos, "newer board (zebra_board) should precede older board (alpha_board)")
+
+    def test_anan_homework_not_prioritized_when_another_board_is_newer(self) -> None:
+        """anan_homework must NOT get special position when a newer board exists."""
+        import time
+
+        self.storage.save_board(
+            board_id="anan_homework",
+            data={"title": "安安今日作业", "items": ["数学"]},
+        )
+        time.sleep(0.01)
+        self.storage.save_board(board_id="newer_board", data={"title": "最新通知"})
+
+        summary = format_board_summary(self.storage)
+        # newer_board was saved after anan_homework → it must appear first
+        anan_pos = summary.find("anan_homework")
+        newer_pos = summary.find("newer_board")
+        self.assertGreater(anan_pos, newer_pos, "newer_board should precede anan_homework despite anan_homework's special ID")
 
     def test_summary_with_list_data(self) -> None:
         self.storage.save_board(
