@@ -15,7 +15,7 @@ from app.llm import (
     format_board_summary,
     llm_client,
 )
-from app.storage import board_storage
+from app.storage import board_storage, routing_config_storage
 
 app = FastAPI(title="Voice Kiosk Relay Bridge", version="0.1.0")
 
@@ -34,6 +34,23 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     route: str = "local"
+
+
+class MuseKeywordItem(BaseModel):
+    keyword: str
+    topic: str = ""
+    note: str = ""
+
+
+class RoutingConfigRequest(BaseModel):
+    version: int = 1
+    updated_at: str | None = None
+    muse_keywords: list[MuseKeywordItem] = []
+
+
+class RoutingConfigResponse(BaseModel):
+    ok: bool = True
+    version: int
 
 
 class ConnectionManager:
@@ -137,6 +154,25 @@ def get_board(board_id: str) -> dict[str, Any]:
 @app.get("/api/v1/boards", dependencies=[Depends(verify_device_or_push_token)])
 def list_boards() -> list[str]:
     return board_storage.list_boards()
+
+
+@app.post(
+    "/api/v1/config/routing",
+    response_model=RoutingConfigResponse,
+    dependencies=[Depends(verify_push_token)],
+)
+def save_routing_config(payload: RoutingConfigRequest) -> RoutingConfigResponse:
+    stored = payload.model_dump() if hasattr(payload, "model_dump") else payload.dict()
+    routing_config_storage.save_config(stored)
+    return RoutingConfigResponse(ok=True, version=payload.version)
+
+
+@app.get(
+    "/api/v1/config/routing",
+    dependencies=[Depends(verify_device_or_push_token)],
+)
+def get_routing_config() -> dict[str, Any]:
+    return routing_config_storage.get_config()
 
 
 @app.get("/", response_class=HTMLResponse)

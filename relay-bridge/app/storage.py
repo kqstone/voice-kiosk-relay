@@ -71,3 +71,54 @@ class BoardStorage:
 
 
 board_storage = BoardStorage()
+
+
+class RoutingConfigStorage:
+    def __init__(self, base_dir: Path | None = None) -> None:
+        self._base_dir = base_dir
+
+    @property
+    def base_dir(self) -> Path:
+        return self._base_dir or settings.data_dir
+
+    @base_dir.setter
+    def base_dir(self, value: Path | None) -> None:
+        self._base_dir = value
+
+    @property
+    def config_path(self) -> Path:
+        return self.base_dir / "routing-keywords.json"
+
+    def _ensure_dir(self) -> None:
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+
+    def save_config(self, config_data: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_dir()
+        temp_path = self.base_dir / "routing-keywords.json.tmp"
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, self.config_path)
+        return config_data
+
+    def get_config(self) -> dict[str, Any]:
+        if not self.config_path.exists():
+            return {
+                "version": 0,
+                "muse_keywords": [],
+            }
+        try:
+            with open(self.config_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception:
+            pass
+        return {
+            "version": 0,
+            "muse_keywords": [],
+        }
+
+
+routing_config_storage = RoutingConfigStorage()
