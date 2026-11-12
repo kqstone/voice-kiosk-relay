@@ -2,11 +2,12 @@
 # Release Workflow for Voice Kiosk Relay
 #
 # NOTE ON SIGNING SECRETS:
-# The user will copy the two signing Secrets (ANDROID_KEYSTORE_BASE64 and
-# ANDROID_KEYSTORE_PASSWORD, plus optional ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD)
-# from the voice-kiosk repo to this repo in the GitHub web UI.
-# This workflow is designed to work once those Secrets exist; it is expected
-# to fail at the signing step until they are copied.
+# Four signing Secrets are configured in this repo (set via gh, 2026-11-12):
+# ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
+# ANDROID_KEY_PASSWORD. A new keystore was generated for this repo (PKCS12,
+# alias voice-kiosk); the old voice-kiosk keystore was not reused.
+# ANDROID_KEY_ALIAS defaults to voice-kiosk and ANDROID_KEY_PASSWORD defaults
+# to ANDROID_KEYSTORE_PASSWORD when those Secrets are empty.
 # =============================================================================
 
 name: Release Voice Kiosk Relay
