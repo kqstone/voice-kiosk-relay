@@ -117,7 +117,7 @@ def format_board_summary(storage: BoardStorage) -> str:
                     lines.append(f"{k}: {v}")
         elif isinstance(data, list):
             lines.append("内容列表:")
-            for idx, item in enumerate(items, 1):
+            for idx, item in enumerate(data, 1):
                 lines.append(f"  {idx}. {item}")
         else:
             lines.append(str(data))

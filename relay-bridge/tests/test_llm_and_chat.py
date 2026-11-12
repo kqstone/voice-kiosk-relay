@@ -129,6 +129,16 @@ class TestBoardSummaryAndPrompt(unittest.TestCase):
         other_pos = summary.find("other_board")
         self.assertTrue(anan_pos < other_pos)
 
+    def test_summary_with_list_data(self) -> None:
+        self.storage.save_board(
+            board_id="list_board",
+            data=["alpha", "beta"],
+        )
+        summary = format_board_summary(self.storage)
+        self.assertIn("list_board", summary)
+        self.assertIn("alpha", summary)
+        self.assertIn("beta", summary)
+
     def test_system_prompt_builder(self) -> None:
         prompt = build_chat_system_prompt("看板内容样例")
         self.assertIn("Voice Kiosk", prompt)
