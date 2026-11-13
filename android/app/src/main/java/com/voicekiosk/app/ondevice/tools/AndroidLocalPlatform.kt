@@ -88,8 +88,10 @@ class AndroidLocalPlatform(
     }
 
     override fun playFromSearch(query: String, artist: String?, song: String?): Pair<PlaySearchResult, String?> {
+        val preferred = preferredPlayer().trim()
+        val isFallback = preferred.isNotEmpty() && !isPackageInstalled(context, preferred)
         val target = resolveTargetPlayer(
-            preferredPackage = preferredPlayer(),
+            preferredPackage = preferred,
             availablePlayers = players(context),
             isInstalled = { isPackageInstalled(context, it) },
             resolveLabel = { resolveInstalledAppLabel(context, it) }
@@ -105,7 +107,10 @@ class AndroidLocalPlatform(
         )
 
         return when (launchResult) {
-            BackgroundLaunchResult.SUCCESS -> PlaySearchResult.STARTED to targetLabel
+            BackgroundLaunchResult.SUCCESS -> {
+                val status = if (isFallback) PlaySearchResult.UNINSTALLED_FALLBACK else PlaySearchResult.STARTED
+                status to targetLabel
+            }
             BackgroundLaunchResult.NOT_SUPPORTED -> PlaySearchResult.BACKGROUND_NOT_SUPPORTED to targetLabel
             BackgroundLaunchResult.FAILED -> PlaySearchResult.FAILED to targetLabel
         }

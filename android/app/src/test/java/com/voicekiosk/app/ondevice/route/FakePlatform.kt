@@ -14,6 +14,7 @@ class FakePlatform : LocalPlatform {
     val mediaActions = mutableListOf<MediaAction>()
     var mediaOk = true
     var playResult = PlaySearchResult.STARTED
+    var customPlayerName: String? = null
     var lastSearch: Triple<String, String?, String?>? = null
     val timers = mutableListOf<Pair<Int, String?>>()
     var throwOnVolume = false
@@ -27,7 +28,14 @@ class FakePlatform : LocalPlatform {
     override fun sendMediaAction(action: MediaAction): Boolean { mediaActions += action; return mediaOk }
     override fun playFromSearch(query: String, artist: String?, song: String?): Pair<PlaySearchResult, String?> {
         lastSearch = Triple(query, artist, song)
-        return playResult to (if (playResult == PlaySearchResult.STARTED) "QQ音乐" else null)
+        val name = when (playResult) {
+            PlaySearchResult.STARTED -> customPlayerName ?: "QQ音乐"
+            PlaySearchResult.UNINSTALLED_FALLBACK -> customPlayerName ?: "网易云音乐"
+            PlaySearchResult.BACKGROUND_NOT_SUPPORTED -> customPlayerName
+            PlaySearchResult.FAILED -> customPlayerName
+            PlaySearchResult.NO_PLAYER -> null
+        }
+        return playResult to name
     }
     override fun startTimer(seconds: Int, label: String?): Boolean { timers += seconds to label; return true }
     override fun cancelTimers(): Int { val n = timers.size; timers.clear(); return n }

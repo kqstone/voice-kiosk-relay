@@ -11,7 +11,13 @@ import kotlin.math.roundToInt
 enum class MediaAction { PLAY, PAUSE, NEXT, PREVIOUS }
 
 /** Outcome of asking a third-party player to search and play. */
-enum class PlaySearchResult { STARTED, NO_PLAYER, FAILED, BACKGROUND_NOT_SUPPORTED }
+enum class PlaySearchResult {
+    STARTED,
+    UNINSTALLED_FALLBACK,
+    NO_PLAYER,
+    FAILED,
+    BACKGROUND_NOT_SUPPORTED
+}
 
 /**
  * Device side effects the whitelisted tools need. The Android implementation is
@@ -202,9 +208,13 @@ class LocalToolExecutor(
         }
         // Honest replies: we can only ask the player to search; we cannot see whether it played.
         return when (result) {
-            PlaySearchResult.STARTED -> ToolResult.ok("已让${player ?: "播放器"}搜索播放$what。")
-            PlaySearchResult.NO_PLAYER -> ToolResult.ok("本机没有找到支持语音点歌的播放器，可以先打开播放器，再说「继续播放」。")
-            PlaySearchResult.FAILED -> ToolResult.ok("没能打开播放器，请先手动打开播放器再试。")
+            PlaySearchResult.STARTED -> ToolResult.ok("已让${player ?: "播放器"}在后台搜索播放$what。")
+            PlaySearchResult.UNINSTALLED_FALLBACK -> ToolResult.ok("之前设置的播放器已卸载，已自动切换为${player ?: "默认播放器"}在后台搜索播放$what。")
+            PlaySearchResult.NO_PLAYER -> ToolResult.ok("本机没有找到支持后台点歌的播放器，请在设置中查看。")
+            PlaySearchResult.FAILED -> {
+                val target = if (!player.isNullOrBlank()) "【$player】" else "播放器"
+                ToolResult.ok("无法连接到${target}，请稍后重试。")
+            }
             PlaySearchResult.BACKGROUND_NOT_SUPPORTED -> {
                 val target = if (!player.isNullOrBlank()) "【$player】" else "当前播放器"
                 ToolResult.ok("${target}不支持后台静默点歌，请在设置中切换为网易云音乐或系统音乐。")

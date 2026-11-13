@@ -54,8 +54,16 @@ class LocalToolExecutorTest {
         x.execute(d(Intents.MEDIA_CONTROL, "action" to "resume"))
         assertEquals(listOf(MediaAction.PAUSE, MediaAction.NEXT, MediaAction.PLAY), p.mediaActions)
         val r = x.execute(d(Intents.MEDIA_PLAY, "artist" to "周杰伦", "song" to "晴天"))
-        assertEquals("已让QQ音乐搜索播放周杰伦的「晴天」。", r.reply)
+        assertEquals("已让QQ音乐在后台搜索播放周杰伦的「晴天」。", r.reply)
         assertEquals(Triple("周杰伦 晴天", "周杰伦", "晴天"), p.lastSearch)
+        p.playResult = PlaySearchResult.UNINSTALLED_FALLBACK
+        val fallback = x.execute(d(Intents.MEDIA_PLAY, "artist" to "周杰伦", "song" to "晴天"))
+        assertTrue("honest answer, no cloud fallback", fallback.handled && !fallback.fallbackToCloud)
+        assertEquals("之前设置的播放器已卸载，已自动切换为网易云音乐在后台搜索播放周杰伦的「晴天」。", fallback.reply)
+        p.playResult = PlaySearchResult.FAILED
+        val failed = x.execute(d(Intents.MEDIA_PLAY, "query" to "晴天"))
+        assertTrue("honest answer, no cloud fallback", failed.handled && !failed.fallbackToCloud)
+        assertEquals("无法连接到播放器，请稍后重试。", failed.reply)
         p.playResult = PlaySearchResult.NO_PLAYER
         val none = x.execute(d(Intents.MEDIA_PLAY, "query" to "稻香"))
         assertTrue("honest answer, no cloud fallback", none.handled && !none.fallbackToCloud)

@@ -136,6 +136,26 @@ class AndroidLocalPlatformTest {
     }
 
     @Test
+    fun testResolveTargetPlayer_uninstalledPreferredPackageFallsBackToAvailable() {
+        val available = listOf(
+            "com.netease.cloudmusic" to "网易云音乐",
+            "com.android.music" to "系统音乐"
+        )
+        val uninstalledPkg = "com.tencent.qqmusic"
+
+        val target = AndroidLocalPlatform.resolveTargetPlayer(
+            preferredPackage = uninstalledPkg,
+            availablePlayers = available,
+            isInstalled = { it != uninstalledPkg },
+            resolveLabel = { null }
+        )
+
+        assertNotNull(target)
+        assertEquals("com.netease.cloudmusic", target!!.first)
+        assertEquals("网易云音乐", target.second)
+    }
+
+    @Test
     fun testScanPlayers_handlesScannerExceptionGracefully() {
         val ownPkg = "com.voicekiosk.app"
         val failingScanner = SimulatedMusicPlayerScanner(
