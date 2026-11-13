@@ -25,7 +25,7 @@ import android.view.KeyEvent
  * - Uses MediaSessionManager with NotificationListenerService when notification access is granted.
  * - When notification access is NOT granted, falls back to AudioManager.isMusicActive and routes
  *   the user to the notification-access settings screen.
- * - Inserts the music page when playback starts, and removes it 1 minute after playback stops.
+ * - Broadcasts pure onMusicStateUpdated to listeners (home widget).
  * - ZERO hardcoded track, artist, album, or app names.
  * - Handles active session disappearing mid-playback gracefully without crashing.
  */
@@ -33,12 +33,10 @@ class MusicStateManager(private val context: Context) {
 
     companion object {
         private const val TAG = "MusicStateManager"
-        const val STOP_REMOVAL_DELAY_MS = 60 * 1000L // 1 minute delay before removing stopped music page
         private const val FALLBACK_POLL_INTERVAL_MS = 2000L // 2s poll for audioManager.isMusicActive
     }
 
     interface Listener {
-        fun onMusicVisibilityChanged(visible: Boolean, state: MusicState)
         fun onMusicStateUpdated(state: MusicState)
     }
 
@@ -51,18 +49,8 @@ class MusicStateManager(private val context: Context) {
     private var listener: Listener? = null
     private var activeController: MediaController? = null
     private var currentMusicState = MusicState()
-    private var isMusicPageVisible = false
     private var isStarted = false
     private var hasAutoRoutedNotificationSettings = false
-
-    // 1-minute stop timer runnable
-    private val removeMusicPageRunnable = Runnable {
-        Log.i(TAG, "Playback stopped for 1 minute; removing music page from pager")
-        if (isMusicPageVisible) {
-            isMusicPageVisible = false
-            listener?.onMusicVisibilityChanged(false, currentMusicState)
-        }
-    }
 
     // Periodic fallback poller
     private val fallbackPollRunnable = object : Runnable {
@@ -99,8 +87,6 @@ class MusicStateManager(private val context: Context) {
     fun setListener(listener: Listener?) {
         this.listener = listener
     }
-
-    fun isMusicPageVisible(): Boolean = isMusicPageVisible
 
     fun getCurrentState(): MusicState = currentMusicState
 
@@ -339,25 +325,7 @@ class MusicStateManager(private val context: Context) {
 
     private fun updateMusicState(newState: MusicState) {
         currentMusicState = newState
-
-        if (newState.isPlaying) {
-            // Playback active: cancel any pending 1-minute removal timer
-            mainHandler.removeCallbacks(removeMusicPageRunnable)
-            if (!isMusicPageVisible) {
-                isMusicPageVisible = true
-                listener?.onMusicVisibilityChanged(true, currentMusicState)
-            } else {
-                listener?.onMusicStateUpdated(currentMusicState)
-            }
-        } else {
-            // Playback paused or stopped
-            if (isMusicPageVisible) {
-                listener?.onMusicStateUpdated(currentMusicState)
-                // Schedule removal after 1 minute (60s) per user decision Option A
-                mainHandler.removeCallbacks(removeMusicPageRunnable)
-                mainHandler.postDelayed(removeMusicPageRunnable, STOP_REMOVAL_DELAY_MS)
-            }
-        }
+        listener?.onMusicStateUpdated(currentMusicState)
     }
 
     /**

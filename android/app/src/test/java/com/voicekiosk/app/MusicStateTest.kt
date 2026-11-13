@@ -67,28 +67,21 @@ class MusicStateTest {
     }
 
     @Test
-    fun testPagerIndexMath_withAndWithoutMusicPage() {
+    fun testPagerIndexMath_stableMappingNoMusicPage() {
         val boardCount = 3
 
-        // Case A: Music page not visible
-        val visibleA = false
-        val totalCountA = if (visibleA) 1 + 1 + boardCount else 1 + boardCount
-        assertEquals(4, totalCountA) // Page 0 Home + 3 Boards
+        // Stable mapping: Home always at 0, boards always at 1..N
+        val totalCount = 1 + boardCount
+        assertEquals(4, totalCount) // Page 0 Home + 3 Boards
 
-        fun getBoardIndexA(pos: Int): Int = if (visibleA) pos - 2 else pos - 1
-        assertEquals(0, getBoardIndexA(1))
-        assertEquals(1, getBoardIndexA(2))
-        assertEquals(2, getBoardIndexA(3))
+        fun getBoardIndex(pos: Int): Int = pos - 1
+        assertEquals(0, getBoardIndex(1)) // Board 0 at pos 1
+        assertEquals(1, getBoardIndex(2)) // Board 1 at pos 2
+        assertEquals(2, getBoardIndex(3)) // Board 2 at pos 3
 
-        // Case B: Music page visible (inserted at Index 1)
-        val visibleB = true
-        val totalCountB = if (visibleB) 1 + 1 + boardCount else 1 + boardCount
-        assertEquals(5, totalCountB) // Page 0 Home + Page 1 Music + 3 Boards
-
-        fun getBoardIndexB(pos: Int): Int = if (visibleB) pos - 2 else pos - 1
-        assertEquals(0, getBoardIndexB(2)) // Board 0 at pos 2
-        assertEquals(1, getBoardIndexB(3)) // Board 1 at pos 3
-        assertEquals(2, getBoardIndexB(4)) // Board 2 at pos 4
+        // Board positions and total count never shift regardless of playback state
+        val totalCountDuringPlayback = 1 + boardCount
+        assertEquals(totalCount, totalCountDuringPlayback)
     }
 
     @Test

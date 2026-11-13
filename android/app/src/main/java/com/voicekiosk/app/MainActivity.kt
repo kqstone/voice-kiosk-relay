@@ -242,25 +242,9 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         listeningOverlayContainer = findViewById(R.id.listeningOverlayContainer)
         nightOverlayView = findViewById(R.id.nightOverlayView)
 
-        // 1. Initialize ViewPager2 Navigation Pager Framework (Page 0 Home Screen + Dynamic Music + Dynamic Boards)
+        // 1. Initialize ViewPager2 Navigation Pager Framework (Page 0 Home Screen + Dynamic Boards)
         musicStateManager = MusicStateManager(this).apply {
             setListener(object : MusicStateManager.Listener {
-                override fun onMusicVisibilityChanged(visible: Boolean, state: MusicState) {
-                    mainHandler.post {
-                        val wasVisible = pagerAdapter.isMusicPageVisible()
-                        if (wasVisible && !visible && viewPager.currentItem == 1) {
-                            viewPager.setCurrentItem(0, true)
-                            mainHandler.postDelayed({
-                                pagerAdapter.setMusicPageVisible(false, state)
-                                pageIndicator.setPageCount(pagerAdapter.itemCount)
-                            }, 300L)
-                        } else {
-                            pagerAdapter.setMusicPageVisible(visible, state)
-                            pageIndicator.setPageCount(pagerAdapter.itemCount)
-                        }
-                    }
-                }
-
                 override fun onMusicStateUpdated(state: MusicState) {
                     mainHandler.post {
                         pagerAdapter.updateMusicState(state)
