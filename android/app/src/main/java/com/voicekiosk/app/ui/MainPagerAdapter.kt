@@ -48,6 +48,7 @@ class MainPagerAdapter(
 
     private var musicState: MusicState? = null
     private var isMusicPageVisible: Boolean = false
+    private var activeHomeViewHolder: HomeViewHolder? = null
     private val boardIdMap = mutableMapOf<String, Long>()
     private var nextBoardLongId = 100L
 
@@ -93,6 +94,7 @@ class MainPagerAdapter(
         if (state != null) {
             musicState = state
         }
+        activeHomeViewHolder?.setMusicVisibility(visible, state ?: musicState)
         if (!wasVisible && visible) {
             notifyItemInserted(1)
         } else if (wasVisible && !visible) {
@@ -104,10 +106,20 @@ class MainPagerAdapter(
 
     fun updateMusicState(state: MusicState) {
         musicState = state
+        activeHomeViewHolder?.updateMusicState(state)
         if (isMusicPageVisible) {
             notifyItemChanged(1)
         }
     }
+
+    fun updateHomeMusicVisibility(visible: Boolean, state: MusicState? = null) {
+        if (state != null) {
+            musicState = state
+        }
+        activeHomeViewHolder?.setMusicVisibility(visible, state ?: musicState)
+    }
+
+    fun getActiveHomeViewHolder(): HomeViewHolder? = activeHomeViewHolder
 
     fun setBoards(newBoards: List<BoardModel>) {
         this.boards = newBoards
@@ -149,7 +161,7 @@ class MainPagerAdapter(
         return when (viewType) {
             VIEW_TYPE_HOME -> {
                 val view = inflater.inflate(R.layout.fragment_home, parent, false)
-                HomeViewHolder(view, onWakeInteraction)
+                HomeViewHolder(view, onWakeInteraction, onMediaControl, onOpenNotificationSettings)
             }
             VIEW_TYPE_MUSIC -> {
                 val view = inflater.inflate(R.layout.fragment_music, parent, false)
@@ -164,7 +176,10 @@ class MainPagerAdapter(
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (holder) {
-            is HomeViewHolder -> holder.bind()
+            is HomeViewHolder -> {
+                activeHomeViewHolder = holder
+                holder.bind(musicState, isMusicVisible = isMusicPageVisible || (musicState?.isPlaying == true))
+            }
             is MusicViewHolder -> {
                 musicState?.let { holder.bind(it) }
             }
@@ -180,7 +195,10 @@ class MainPagerAdapter(
     override fun onViewAttachedToWindow(holder: RecyclerView.ViewHolder) {
         super.onViewAttachedToWindow(holder)
         when (holder) {
-            is HomeViewHolder -> holder.onAttached()
+            is HomeViewHolder -> {
+                activeHomeViewHolder = holder
+                holder.onAttached()
+            }
             is MusicViewHolder -> holder.onAttached()
         }
     }
@@ -188,7 +206,12 @@ class MainPagerAdapter(
     override fun onViewDetachedFromWindow(holder: RecyclerView.ViewHolder) {
         super.onViewDetachedFromWindow(holder)
         when (holder) {
-            is HomeViewHolder -> holder.onDetached()
+            is HomeViewHolder -> {
+                if (activeHomeViewHolder === holder) {
+                    activeHomeViewHolder = null
+                }
+                holder.onDetached()
+            }
             is MusicViewHolder -> holder.onDetached()
         }
     }
@@ -196,7 +219,12 @@ class MainPagerAdapter(
     override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
         super.onViewRecycled(holder)
         when (holder) {
-            is HomeViewHolder -> holder.onDetached()
+            is HomeViewHolder -> {
+                if (activeHomeViewHolder === holder) {
+                    activeHomeViewHolder = null
+                }
+                holder.onDetached()
+            }
             is MusicViewHolder -> holder.onDetached()
         }
     }
@@ -295,7 +323,9 @@ class MainPagerAdapter(
 
     class HomeViewHolder(
         itemView: View,
-        private val onWakeInteraction: (() -> Unit)?
+        private val onWakeInteraction: (() -> Unit)?,
+        private val onMediaControl: ((MediaControlAction) -> Unit)? = null,
+        private val onOpenNotificationSettings: (() -> Unit)? = null
     ) : RecyclerView.ViewHolder(itemView), WeatherManager.WeatherListener {
 
         private val tvDateLine: TextView? = itemView.findViewById(R.id.tvDateLine)
@@ -307,6 +337,17 @@ class MainPagerAdapter(
         private val tvSlideHint: TextView? = itemView.findViewById(R.id.tvSlideHint)
         private val tvWakePrompt: TextView? = itemView.findViewById(R.id.tvWakePrompt)
 
+        val musicWidgetController: HomeMusicWidgetController? = try {
+            val widgetView: View? = itemView.findViewById(R.id.layoutNowPlaying)
+            if (widgetView != null) {
+                HomeMusicWidgetController(widgetView, onMediaControl, onOpenNotificationSettings)
+            } else {
+                null
+            }
+        } catch (_: Throwable) {
+            null
+        }
+
         private val mainHandler = Handler(Looper.getMainLooper())
         private val dateRefreshRunnable = object : Runnable {
             override fun run() {
@@ -315,7 +356,7 @@ class MainPagerAdapter(
             }
         }
 
-        fun bind() {
+        fun bind(musicState: MusicState? = null, isMusicVisible: Boolean = false) {
             updateDateLine()
 
             val context = itemView.context
@@ -353,6 +394,27 @@ class MainPagerAdapter(
                     tvWeatherDesc?.text = "正在获取天气..."
                 }
             }
+
+            if (musicState != null) {
+                musicWidgetController?.bind(musicState)
+                musicWidgetController?.setVisible(isMusicVisible, animate = false)
+            } else {
+                musicWidgetController?.setVisible(false, animate = false)
+            }
+        }
+
+        fun updateMusicState(state: MusicState) {
+            musicWidgetController?.bind(state)
+            if (state.isPlaying) {
+                musicWidgetController?.setVisible(true, animate = true)
+            }
+        }
+
+        fun setMusicVisibility(visible: Boolean, state: MusicState? = null) {
+            if (state != null) {
+                musicWidgetController?.bind(state)
+            }
+            musicWidgetController?.setVisible(visible, animate = true)
         }
 
         fun onAttached() {
@@ -362,9 +424,11 @@ class MainPagerAdapter(
             WeatherManager.addListener(this)
             val context = itemView.context
             WeatherManager.getCachedWeatherInfo(context)?.let { bindWeatherInfo(it) }
+            musicWidgetController?.onAttached()
         }
 
         fun onDetached() {
+            musicWidgetController?.onDetached()
             WeatherManager.removeListener(this)
             mainHandler.removeCallbacks(dateRefreshRunnable)
         }

@@ -13,79 +13,103 @@
         android:clickable="false"
         android:focusable="false" />
 
-    <!-- Centered Content Container (Landscape: Centered horizontally and vertically) -->
+    <!-- Horizontal Two-Column Container (Landscape: Centered horizontally and vertically) -->
     <LinearLayout
-        android:layout_width="wrap_content"
+        android:id="@+id/layoutHomeContent"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:gravity="center_horizontal"
-        android:orientation="vertical">
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingStart="40dp"
+        android:paddingEnd="40dp">
 
-        <!-- Top Date Line: Gregorian + Weekday + Chinese Lunar -->
-        <TextView
-            android:id="@+id/tvDateLine"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:fontFamily="sans-serif"
-            android:gravity="center"
-            android:textColor="@color/text_secondary"
-            android:textSize="15sp" />
-
-        <!-- Super Large Centered Clock: 96sp+ (via values-land/dimens.xml) -->
-        <TextClock
-            android:id="@+id/textClock"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:fontFamily="sans-serif-light"
-            android:format12Hour="HH:mm"
-            android:format24Hour="HH:mm"
-            android:gravity="center"
-            android:includeFontPadding="false"
-            android:textColor="@color/text_white"
-            android:textSize="@dimen/clock_text_size" />
-
-        <!-- Weather Capsule -->
+        <!-- Left Column: Centered Date Line, Giant Clock (96sp), Weather Capsule -->
         <LinearLayout
-            android:id="@+id/weatherCapsule"
-            android:layout_width="wrap_content"
+            android:id="@+id/layoutHomeLeft"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:background="@drawable/bg_weather_capsule"
-            android:clickable="true"
-            android:focusable="true"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingStart="20dp"
-            android:paddingTop="8dp"
-            android:paddingEnd="20dp"
-            android:paddingBottom="8dp">
+            android:layout_weight="1"
+            android:gravity="center_horizontal"
+            android:orientation="vertical">
 
+            <!-- Top Date Line: Gregorian + Weekday + Chinese Lunar -->
             <TextView
-                android:id="@+id/tvWeatherIcon"
+                android:id="@+id/tvDateLine"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:textColor="@color/accent_amber"
-                android:textSize="18sp" />
-
-            <TextView
-                android:id="@+id/tvWeatherTemp"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginEnd="8dp"
-                android:fontFamily="sans-serif-medium"
-                android:textColor="@color/text_white"
-                android:textSize="16sp" />
-
-            <TextView
-                android:id="@+id/tvWeatherDesc"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif"
+                android:gravity="center"
                 android:textColor="@color/text_secondary"
-                android:textSize="13sp" />
+                android:textSize="15sp" />
+
+            <!-- Super Large Centered Clock: 96sp+ (via values-land/dimens.xml) -->
+            <TextClock
+                android:id="@+id/textClock"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:fontFamily="sans-serif-light"
+                android:format12Hour="HH:mm"
+                android:format24Hour="HH:mm"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:textColor="@color/text_white"
+                android:textSize="@dimen/clock_text_size" />
+
+            <!-- Weather Capsule -->
+            <LinearLayout
+                android:id="@+id/weatherCapsule"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_weather_capsule"
+                android:clickable="true"
+                android:focusable="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="20dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="20dp"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:id="@+id/tvWeatherIcon"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:textColor="@color/accent_amber"
+                    android:textSize="18sp" />
+
+                <TextView
+                    android:id="@+id/tvWeatherTemp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginEnd="8dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:textColor="@color/text_white"
+                    android:textSize="16sp" />
+
+                <TextView
+                    android:id="@+id/tvWeatherDesc"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+
+            </LinearLayout>
 
         </LinearLayout>
+
+        <!-- Right Column: Now-Playing Widget (Fixed width 360dp, vertically centered) -->
+        <include
+            android:id="@+id/layoutNowPlaying"
+            layout="@layout/widget_home_now_playing"
+            android:layout_width="360dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:layout_marginStart="32dp"
+            android:visibility="gone" />
 
     </LinearLayout>
 

@@ -89,6 +89,15 @@
 
         </LinearLayout>
 
+        <!-- Now-Playing Widget: directly below weather capsule, full width, 20dp margin, OLED dark -->
+        <include
+            android:id="@+id/layoutNowPlaying"
+            layout="@layout/widget_home_now_playing"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:visibility="gone" />
+
     </LinearLayout>
 
     <!-- Bottom Guides Container: Slide Hint + Wake Prompt (positioned above page indicator) -->
