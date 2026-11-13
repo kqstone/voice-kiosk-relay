@@ -41,7 +41,7 @@ class DashboardAndAodContractTest {
         // Pure black OLED background
         assertTrue("Must use pure black #000000 background", content.contains("#000000"))
 
-        // Burn-in container positioned in upper viewport for pet and HUD stage
+        // Burn-in container positioned in upper viewport for HUD stage
         assertTrue(
             "Burn-in container must use flex-start alignment",
             content.contains("justify-content: flex-start")
@@ -86,15 +86,9 @@ class DashboardAndAodContractTest {
     }
 
     @Test
-    fun testMainActivity_aodAndPetHudIntegration() {
+    fun testMainActivity_aodHudIntegration() {
         val mainFile = locateSourceFile("MainActivity.kt")
         val content = mainFile.readText(StandardCharsets.UTF_8)
-
-        // Native views setup
-        assertTrue("MainActivity must instantiate PetAvatarView", content.contains("PetAvatarView(this)"))
-        assertTrue("PetAvatarView size 210dp", content.contains("dpToPx(210)"))
-        assertTrue("PetAvatarView bottomMargin 44dp", content.contains("dpToPx(44)"))
-        assertTrue("Must set OnPetTappedListener", content.contains("setOnPetTappedListener"))
 
         // Voice listening overlay views
         assertTrue("Must declare listeningOverlayContainer", content.contains("listeningOverlayContainer"))
@@ -108,17 +102,6 @@ class DashboardAndAodContractTest {
         // AOD vs Active management
         assertTrue("Must declare updateDisplayPowerAndAodState", content.contains("fun updateDisplayPowerAndAodState()"))
         assertTrue("Must dispatch onAodModeChanged", content.contains("onAodModeChanged"))
-
-        // Pet states synchronization
-        assertTrue("Must transition to WAKE_SURPRISE", content.contains("PetAvatarView.PetState.WAKE_SURPRISE"))
-        assertTrue("Must transition to LISTENING", content.contains("PetAvatarView.PetState.LISTENING"))
-        assertTrue("Must transition to THINKING", content.contains("PetAvatarView.PetState.THINKING"))
-        assertTrue("Must transition to SPEAKING", content.contains("PetAvatarView.PetState.SPEAKING"))
-        assertTrue("Must transition to FOLLOW_UP", content.contains("PetAvatarView.PetState.FOLLOW_UP"))
-        assertTrue("Must transition to CONFUSED", content.contains("PetAvatarView.PetState.CONFUSED"))
-        assertTrue("Must transition to ERROR", content.contains("PetAvatarView.PetState.ERROR"))
-        assertTrue("Must support AOD_IDLE", content.contains("PetAvatarView.PetState.AOD_IDLE"))
-        assertTrue("Must support AOD_SLEEP", content.contains("PetAvatarView.PetState.AOD_SLEEP"))
 
         // Weather integration
         assertTrue("Must call WeatherManager.fetchWeatherIfNeeded", content.contains("WeatherManager.fetchWeatherIfNeeded"))

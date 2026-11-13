@@ -74,7 +74,6 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
     private val weatherPresetChips = mutableListOf<Pair<TextView, CityLocation>>()
 
     // OLED Standby & Night Mode
-    private lateinit var petAvatarCheckBox: CheckBox
     private lateinit var onDeviceRoutingCheckBox: CheckBox
     private lateinit var onDeviceModelCheckBox: CheckBox
     private lateinit var onDeviceDebugCheckBox: CheckBox
@@ -690,21 +689,6 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
             layoutParams = lp
         }
         oledCard.addView(oledTitle)
-
-        petAvatarCheckBox = CheckBox(this).apply {
-            text = "显示灵动桌面宠物伴侣（未激活时极简线条呼吸，唤醒对话时展现表情与声波动画）"
-            setTextColor(Color.parseColor("#E5E7EB"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            isChecked = AppConfig.isPetAvatarEnabled(this@SettingsActivity)
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                bottomMargin = dpToPx(8)
-            }
-            layoutParams = lp
-        }
-        oledCard.addView(petAvatarCheckBox)
 
         nightModeCheckBox = CheckBox(this).apply {
             text = "启用夜间深暗护眼模式（在设定夜间时段内自动施加变黑遮罩并降至最低硬件背光）"
@@ -1542,7 +1526,6 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
 
         // OLED & Night Mode settings
         val chosenNightDim = (MIN_NIGHT_DIM + nightDimSeekBar.progress * NIGHT_DIM_STEP).let { (it * 100).roundToInt() / 100f }
-        AppConfig.setPetAvatarEnabled(this, petAvatarCheckBox.isChecked)
         AppConfig.setOnDeviceRoutingEnabled(this, onDeviceRoutingCheckBox.isChecked)
         AppConfig.setOnDeviceModelRoutingEnabled(this, onDeviceModelCheckBox.isChecked)
         AppConfig.setOnDeviceRouteDebugEnabled(this, onDeviceDebugCheckBox.isChecked)

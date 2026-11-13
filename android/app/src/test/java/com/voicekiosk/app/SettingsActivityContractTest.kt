@@ -77,8 +77,6 @@ class SettingsActivityContractTest {
             "Must include OLED card title",
             content.contains("\"OLED 息屏待机与夜间护眼设置\"")
         )
-        assertTrue("Must declare petAvatarCheckBox", content.contains("petAvatarCheckBox"))
-        assertTrue("Must mention desktop pet avatar description", content.contains("\"显示灵动桌面宠物伴侣"))
         assertTrue("Must declare nightModeCheckBox", content.contains("nightModeCheckBox"))
         assertTrue("Must mention night mode description", content.contains("\"启用夜间深暗护眼模式"))
         assertTrue("Must include schedule label", content.contains("\"夜间变黑生效时间段 (24 小时制，支持跨午夜)\""))
@@ -96,7 +94,6 @@ class SettingsActivityContractTest {
         val file = locateSourceFile("SettingsActivity.kt")
         val content = file.readText(StandardCharsets.UTF_8)
 
-        assertTrue("Must save petAvatarEnabled in AppConfig", content.contains("AppConfig.setPetAvatarEnabled"))
         assertTrue("Must save nightModeEnabled in AppConfig", content.contains("AppConfig.setNightModeEnabled"))
         assertTrue("Must save nightModeStartHour in AppConfig", content.contains("AppConfig.setNightModeStartHour"))
         assertTrue("Must save nightModeEndHour in AppConfig", content.contains("AppConfig.setNightModeEndHour"))

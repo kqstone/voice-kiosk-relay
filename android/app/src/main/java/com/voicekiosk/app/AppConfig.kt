@@ -78,7 +78,6 @@ object AppConfig {
     private const val KEY_NIGHT_MODE_START_HOUR = "pref_night_mode_start_hour"
     private const val KEY_NIGHT_MODE_END_HOUR = "pref_night_mode_end_hour"
     private const val KEY_NIGHT_MODE_DIM_ALPHA = "pref_night_dim_alpha"
-    private const val KEY_PET_AVATAR_ENABLED = "pref_pet_avatar_enabled"
     private const val KEY_ONDEVICE_ROUTING_ENABLED = "pref_ondevice_routing_enabled"
     private const val KEY_ONDEVICE_MODEL_ROUTING_ENABLED = "pref_ondevice_model_routing_enabled"
     private const val KEY_ONDEVICE_ROUTE_DEBUG = "pref_ondevice_route_debug"
@@ -232,13 +231,6 @@ object AppConfig {
 
     fun setNightModeDimAlpha(context: Context, alpha: Float) {
         prefs(context).edit().putFloat(KEY_NIGHT_MODE_DIM_ALPHA, clampNightDimAlpha(alpha)).apply()
-    }
-
-    fun isPetAvatarEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_PET_AVATAR_ENABLED, true)
-
-    fun setPetAvatarEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_PET_AVATAR_ENABLED, enabled).apply()
     }
 
     /**

@@ -70,7 +70,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         private const val PERMISSION_REQUEST_AUDIO = 201
         private const val BURN_IN_SHIFT_INTERVAL_MS = 60 * 1000L // 60 seconds
         private const val WAKE_STATE_DURATION_MS = 3500L // 3.5 seconds
-        private const val WAKE_SURPRISE_DURATION_MS = 650L // 650ms initial wake reaction before listening
         private const val TOUCH_WAKE_DURATION_MS = 8000L // 8 seconds of active display on touch
         private const val WEATHER_REFRESH_INTERVAL_MS = 30 * 60 * 1000L // 30 minutes
         const val HOST_SPEAK_MAX_CHARS = VoiceKioskService.HOST_SPEAK_MAX_CHARS
@@ -92,9 +91,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     private lateinit var nightOverlayView: View
     private lateinit var voiceOverlay: VoiceListeningOverlayView
 
-    // Preserved pet avatar view for AOD standby
-    private lateinit var petAvatarView: PetAvatarView
-
     private val mainHandler = Handler(Looper.getMainLooper())
     private val random = Random()
 
@@ -108,14 +104,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     private val touchWakeTimeoutRunnable = Runnable {
         isTouchAwake = false
         updateDisplayPowerAndAodState()
-    }
-
-    private val wakeSurpriseToListeningRunnable = Runnable {
-        if (isConversationActive && ::petAvatarView.isInitialized &&
-            petAvatarView.getPetState() == PetAvatarView.PetState.WAKE_SURPRISE
-        ) {
-            petAvatarView.setPetState(PetAvatarView.PetState.LISTENING)
-        }
     }
 
     private val resetWakeStateRunnable = Runnable {
@@ -356,20 +344,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     }
 
     private fun setupVoiceListeningOverlay() {
-        // Preserved pet avatar view for AOD standby
-        petAvatarView = PetAvatarView(this).apply {
-            val size = dpToPx(210)
-            layoutParams = FrameLayout.LayoutParams(size, size).apply {
-                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                bottomMargin = dpToPx(44)
-            }
-            setOnPetTappedListener {
-                onUserInteractionWake()
-            }
-            visibility = if (AppConfig.isPetAvatarEnabled(this@MainActivity)) View.VISIBLE else View.GONE
-        }
-        contentShiftContainer.addView(petAvatarView)
-
         // Phase 6 Voice Listening Overlay
         voiceOverlay = VoiceListeningOverlayView(this).apply {
             layoutParams = FrameLayout.LayoutParams(
@@ -439,10 +413,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         val isNight = AppConfig.isNightModeEnabled(this) &&
             AppConfig.isNightHour(hour, AppConfig.getNightModeStartHour(this), AppConfig.getNightModeEndHour(this))
 
-        if (::petAvatarView.isInitialized) {
-            petAvatarView.visibility = if (AppConfig.isPetAvatarEnabled(this)) View.VISIBLE else View.GONE
-        }
-
         val lp = window.attributes
 
         if (isAodStandby) {
@@ -456,12 +426,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             }
             if (::listeningOverlayContainer.isInitialized) {
                 listeningOverlayContainer.visibility = View.GONE
-            }
-
-            if (::petAvatarView.isInitialized) {
-                petAvatarView.setPetState(
-                    if (isNight) PetAvatarView.PetState.AOD_SLEEP else PetAvatarView.PetState.AOD_IDLE
-                )
             }
 
             val targetAlpha: Float
@@ -501,15 +465,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
                     .start()
             }
 
-            if (!isConversationActive && ::petAvatarView.isInitialized) {
-                val currentPetState = petAvatarView.getPetState()
-                if (currentPetState == PetAvatarView.PetState.AOD_IDLE ||
-                    currentPetState == PetAvatarView.PetState.AOD_SLEEP
-                ) {
-                    petAvatarView.setPetState(PetAvatarView.PetState.FOLLOW_UP)
-                }
-            }
-
             // onAodModeChanged(false) dispatch
         }
     }
@@ -533,13 +488,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         }
         if (::settingsButton.isInitialized) {
             settingsButton.animate()
-                .translationX(offsetX)
-                .translationY(offsetY)
-                .setDuration(900L)
-                .start()
-        }
-        if (::petAvatarView.isInitialized) {
-            petAvatarView.animate()
                 .translationX(offsetX)
                 .translationY(offsetY)
                 .setDuration(900L)
@@ -672,21 +620,8 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             voiceOverlay.setSpeechText("“请讲，我在听...”")
         }
 
-        if (::petAvatarView.isInitialized) {
-            petAvatarView.setPetState(PetAvatarView.PetState.WAKE_SURPRISE)
-        }
-
-        mainHandler.removeCallbacks(wakeSurpriseToListeningRunnable)
-        mainHandler.postDelayed(wakeSurpriseToListeningRunnable, WAKE_SURPRISE_DURATION_MS)
-
         updateDisplayPowerAndAodState()
         mainHandler.removeCallbacks(resetWakeStateRunnable)
-    }
-
-    override fun onAudioEnergy(energy: Float) {
-        if (::petAvatarView.isInitialized) {
-            petAvatarView.setAudioEnergy(energy)
-        }
     }
 
     override fun onAsrDownloadProgress(progressPercent: Int, statusText: String) {
@@ -726,9 +661,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
                 voiceOverlay.setStatus("正在聆听...", isAmber = false)
                 voiceOverlay.setSpeechText("“$text”")
             }
-            if (::petAvatarView.isInitialized) {
-                petAvatarView.setPetState(PetAvatarView.PetState.LISTENING)
-            }
         }
     }
 
@@ -742,18 +674,12 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
                 voiceOverlay.setStatus("未听清", isAmber = true)
                 voiceOverlay.setSpeechText("未听清，请重试")
             }
-            if (::petAvatarView.isInitialized) {
-                petAvatarView.setPetState(PetAvatarView.PetState.CONFUSED)
-            }
             mainHandler.removeCallbacks(resetWakeStateRunnable)
             mainHandler.postDelayed(resetWakeStateRunnable, WAKE_STATE_DURATION_MS)
         } else {
             if (::voiceOverlay.isInitialized) {
                 voiceOverlay.setStatus("思考中...", isAmber = false)
                 voiceOverlay.setSpeechText("“$text”")
-            }
-            if (::petAvatarView.isInitialized) {
-                petAvatarView.setPetState(PetAvatarView.PetState.THINKING)
             }
         }
     }
@@ -767,9 +693,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             voiceOverlay.show()
             voiceOverlay.setStatus("回答完毕", isAmber = false)
             voiceOverlay.setReply(replyText, isError = false)
-        }
-        if (::petAvatarView.isInitialized) {
-            petAvatarView.setPetState(PetAvatarView.PetState.SPEAKING)
         }
         mainHandler.removeCallbacks(resetWakeStateRunnable)
         mainHandler.postDelayed(resetWakeStateRunnable, 4000L)
@@ -785,9 +708,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             voiceOverlay.show()
             voiceOverlay.setStatus("等待 Muse 回复中...", isAmber = true)
             voiceOverlay.setSpeechText(statusText.ifEmpty { "正在思考..." })
-        }
-        if (::petAvatarView.isInitialized) {
-            petAvatarView.setPetState(PetAvatarView.PetState.THINKING)
         }
         mainHandler.removeCallbacks(resetWakeStateRunnable)
     }
@@ -852,9 +772,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             voiceOverlay.setStatus("⚠ 离线提示", isAmber = true)
             voiceOverlay.setReply(errorMessage, isError = true)
         }
-        if (::petAvatarView.isInitialized) {
-            petAvatarView.setPetState(PetAvatarView.PetState.ERROR)
-        }
         mainHandler.removeCallbacks(resetWakeStateRunnable)
         mainHandler.postDelayed(resetWakeStateRunnable, 5000L)
     }
@@ -869,9 +786,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             voiceOverlay.show()
             voiceOverlay.setStatus("对话中，继续说...", isAmber = false)
             voiceOverlay.setSpeechText("“请讲，我在听...”")
-        }
-        if (::petAvatarView.isInitialized) {
-            petAvatarView.setPetState(PetAvatarView.PetState.FOLLOW_UP)
         }
         mainHandler.removeCallbacks(resetWakeStateRunnable)
     }
@@ -919,7 +833,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
 
     private fun resetWakeUiState() {
         isConversationActive = false
-        mainHandler.removeCallbacks(wakeSurpriseToListeningRunnable)
         mainHandler.removeCallbacks(resetWakeStateRunnable)
         if (::voiceOverlay.isInitialized && voiceOverlay.visibility == View.VISIBLE) {
             voiceOverlay.dismiss {
@@ -934,14 +847,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             }
             updateDisplayPowerAndAodState()
         }
-    }
-
-    private fun dpToPx(dp: Int): Int {
-        return (dp * resources.displayMetrics.density).toInt()
-    }
-
-    private fun dpToPx(dp: Float): Int {
-        return (dp * resources.displayMetrics.density).toInt()
     }
 
     /**
