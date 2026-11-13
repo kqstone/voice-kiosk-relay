@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/oled_black"
+    android:paddingStart="20dp"
+    android:paddingTop="20dp"
+    android:paddingEnd="20dp"
+    android:paddingBottom="20dp">
+
+    <LinearLayout
+        android:id="@+id/cardMusic"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:background="@drawable/bg_music_card"
+        android:padding="20dp">
+
+        <!-- Top Header: Soundwave + Status + Dynamic Source Badge -->
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentStart="true"
+                android:layout_centerVertical="true"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <ImageView
+                    android:id="@+id/ivSoundWave"
+                    android:layout_width="18dp"
+                    android:layout_height="18dp"
+                    android:src="@drawable/ic_music_wave"
+                    android:contentDescription="Soundwave" />
+
+                <TextView
+                    android:id="@+id/tvMusicPlayingStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:text="正在播放"
+                    android:textColor="@color/accent_cyan_bright"
+                    android:textSize="13sp"
+                    android:fontFamily="sans-serif-medium" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvMusicSourceBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:background="@drawable/bg_music_badge"
+                android:paddingStart="10dp"
+                android:paddingTop="3dp"
+                android:paddingEnd="10dp"
+                android:paddingBottom="3dp"
+                android:textColor="@color/text_secondary"
+                android:textSize="11sp"
+                android:fontFamily="sans-serif-medium"
+                android:visibility="gone"
+                tools:text="Player"
+                tools:visibility="visible" />
+        </RelativeLayout>
+
+        <!-- Center Disc / Album Art Container -->
+        <FrameLayout
+            android:id="@+id/flDiscContainer"
+            android:layout_width="190dp"
+            android:layout_height="190dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginTop="8dp"
+            android:layout_marginBottom="20dp">
+
+            <ImageView
+                android:id="@+id/ivVinylDisc"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:src="@drawable/ic_vinyl_disc"
+                android:contentDescription="Vinyl Disc" />
+
+            <ImageView
+                android:id="@+id/ivAlbumArt"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:visibility="gone"
+                android:contentDescription="Album Art" />
+        </FrameLayout>
+
+        <!-- Dynamic Title & Artist (No hardcoded content) -->
+        <TextView
+            android:id="@+id/tvTrackTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textColor="@color/text_white"
+            android:textSize="18sp"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:layout_marginBottom="4dp"
+            tools:text="Title" />
+
+        <TextView
+            android:id="@+id/tvTrackArtist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp"
+            android:fontFamily="sans-serif"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:layout_marginBottom="16dp"
+            tools:text="Artist" />
+
+        <!-- Progress Bar & Elapsed/Duration Times -->
+        <ProgressBar
+            android:id="@+id/progressBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:max="1000"
+            android:progress="0"
+            android:progressTint="@color/accent_cyan"
+            android:progressBackgroundTint="@color/border_card" />
+
+        <RelativeLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:layout_marginBottom="18dp">
+
+            <TextView
+                android:id="@+id/tvTimeElapsed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentStart="true"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp"
+                android:fontFamily="sans-serif-monospace"
+                android:text="00:00" />
+
+            <TextView
+                android:id="@+id/tvTimeDuration"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentEnd="true"
+                android:textColor="@color/text_muted"
+                android:textSize="11sp"
+                android:fontFamily="sans-serif-monospace"
+                android:text="00:00" />
+        </RelativeLayout>
+
+        <!-- Playback Controls: Prev, Play/Pause, Next -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <FrameLayout
+                android:id="@+id/btnPrev"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_music_control_circle"
+                android:clickable="true"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_music_prev"
+                    android:contentDescription="Previous" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="24dp"
+                android:layout_marginEnd="24dp">
+
+                <ImageView
+                    android:id="@+id/btnPlayPause"
+                    android:layout_width="56dp"
+                    android:layout_height="56dp"
+                    android:background="@drawable/bg_music_play_circle"
+                    android:src="@drawable/ic_music_pause"
+                    android:scaleType="centerInside"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:contentDescription="Play or Pause" />
+            </FrameLayout>
+
+            <FrameLayout
+                android:id="@+id/btnNext"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_music_control_circle"
+                android:clickable="true"
+                android:focusable="true">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/ic_music_next"
+                    android:contentDescription="Next" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <!-- Notification Permission Fallback Hint Banner -->
+        <LinearLayout
+            android:id="@+id/layoutPermissionHint"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_permission_hint"
+            android:paddingStart="12dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="8dp"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tvPermissionHint"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="未授予通知使用权 · 点击前往开启以显示歌曲详情与封面"
+                android:textColor="@color/accent_amber_light"
+                android:textSize="12sp"
+                android:fontFamily="sans-serif-medium" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Bottom Slide Hint -->
+    <TextView
+        android:id="@+id/tvSlideHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="44dp"
+        android:text="向左滑动查看信息看板 &gt;"
+        android:textColor="@color/text_subtle"
+        android:textSize="12sp"
+        android:fontFamily="sans-serif-medium" />
+
+</FrameLayout>

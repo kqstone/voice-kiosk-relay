@@ -43,6 +43,9 @@ import androidx.viewpager2.widget.ViewPager2
 import com.voicekiosk.app.bridge.OriginBoundHost
 import com.voicekiosk.app.data.BoardModel
 import com.voicekiosk.app.data.BoardRepository
+import com.voicekiosk.app.media.MediaControlAction
+import com.voicekiosk.app.media.MusicState
+import com.voicekiosk.app.media.MusicStateManager
 import com.voicekiosk.app.ui.MainPagerAdapter
 import com.voicekiosk.app.ui.PageIndicatorView
 import android.content.res.Configuration
@@ -82,6 +85,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     private lateinit var pageIndicator: PageIndicatorView
     private lateinit var pagerAdapter: MainPagerAdapter
     private lateinit var boardRepository: BoardRepository
+    private lateinit var musicStateManager: MusicStateManager
     private lateinit var settingsButton: TextView
     private lateinit var listeningOverlayContainer: FrameLayout
     private lateinit var nightOverlayView: View
@@ -185,6 +189,9 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         val updateManager = AndroidReleaseUpdatePlatform.getManager(this)
         updateManager.registerListener(this)
         updateManager.maybeTriggerStartupCheck(AppConfig.isStartupUpdateCheckEnabled(this))
+
+        // 11. Start music state observation
+        musicStateManager.start()
     }
 
     override fun onResume() {
@@ -192,6 +199,9 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         applyImmersiveMode()
         updateDisplayPowerAndAodState()
         refreshWeather(force = false)
+        if (::musicStateManager.isInitialized) {
+            musicStateManager.checkAndUpdateState()
+        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -218,6 +228,9 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
 
     override fun onDestroy() {
         Log.i(TAG, "MainActivity onDestroy")
+        if (::musicStateManager.isInitialized) {
+            musicStateManager.stop()
+        }
         if (::boardRepository.isInitialized) {
             boardRepository.stop()
         }
@@ -240,7 +253,33 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         listeningOverlayContainer = findViewById(R.id.listeningOverlayContainer)
         nightOverlayView = findViewById(R.id.nightOverlayView)
 
-        // 1. Initialize ViewPager2 Navigation Pager Framework (Page 0 Home Screen + Dynamic Boards)
+        // 1. Initialize ViewPager2 Navigation Pager Framework (Page 0 Home Screen + Dynamic Music + Dynamic Boards)
+        musicStateManager = MusicStateManager(this).apply {
+            setListener(object : MusicStateManager.Listener {
+                override fun onMusicVisibilityChanged(visible: Boolean, state: MusicState) {
+                    mainHandler.post {
+                        val wasVisible = pagerAdapter.isMusicPageVisible()
+                        if (wasVisible && !visible && viewPager.currentItem == 1) {
+                            viewPager.setCurrentItem(0, true)
+                            mainHandler.postDelayed({
+                                pagerAdapter.setMusicPageVisible(false, state)
+                                pageIndicator.setPageCount(pagerAdapter.itemCount)
+                            }, 300L)
+                        } else {
+                            pagerAdapter.setMusicPageVisible(visible, state)
+                            pageIndicator.setPageCount(pagerAdapter.itemCount)
+                        }
+                    }
+                }
+
+                override fun onMusicStateUpdated(state: MusicState) {
+                    mainHandler.post {
+                        pagerAdapter.updateMusicState(state)
+                    }
+                }
+            })
+        }
+
         boardRepository = BoardRepository(this).apply {
             setListener(object : BoardRepository.Listener {
                 override fun onBoardsUpdated(boards: List<BoardModel>) {
@@ -263,6 +302,12 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             onWakeInteraction = { onUserInteractionWake() },
             onItemToggle = { boardId, itemId, completed ->
                 boardRepository.toggleItem(boardId, itemId, completed)
+            },
+            onMediaControl = { action ->
+                musicStateManager.handleMediaAction(action)
+            },
+            onOpenNotificationSettings = {
+                musicStateManager.openNotificationAccessSettings()
             }
         )
         viewPager.adapter = pagerAdapter

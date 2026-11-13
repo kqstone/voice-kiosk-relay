@@ -20,24 +20,57 @@ import com.voicekiosk.app.WeatherInfo
 import com.voicekiosk.app.WeatherManager
 import com.voicekiosk.app.data.BoardComponent
 import com.voicekiosk.app.data.BoardModel
+import com.voicekiosk.app.media.MediaControlAction
+import com.voicekiosk.app.media.MusicState
 
 /**
  * Pager adapter for the horizontal navigation container (ViewPager2).
  *
  * Page 0: Home screen (giant clock, Gregorian + weekday + Chinese lunar date, weather capsule, bottom glow arc).
- * Pages 1..N: Dynamic board pages fetched from the bridge (Title, Checklist, List, KeyValue).
+ * Page 1 (Dynamic): Music page when playback is active (auto-removed 1 minute after stopping).
+ * Pages 1..N (or 2..N+1): Dynamic board pages fetched from the bridge (Title, Checklist, List, KeyValue).
  *
  * NOTE: Contains ZERO hardcoded board content and ZERO estimated-time fields.
  */
 class MainPagerAdapter(
     private var boards: List<BoardModel> = emptyList(),
     private val onWakeInteraction: (() -> Unit)? = null,
-    private val onItemToggle: ((boardId: String, itemId: String, completed: Boolean) -> Unit)? = null
+    private val onItemToggle: ((boardId: String, itemId: String, completed: Boolean) -> Unit)? = null,
+    private val onMediaControl: ((action: MediaControlAction) -> Unit)? = null,
+    private val onOpenNotificationSettings: (() -> Unit)? = null
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
         const val VIEW_TYPE_HOME = 0
         const val VIEW_TYPE_BOARD = 1
+        const val VIEW_TYPE_MUSIC = 2
+    }
+
+    private var musicState: MusicState? = null
+    private var isMusicPageVisible: Boolean = false
+
+    fun isMusicPageVisible(): Boolean = isMusicPageVisible
+
+    fun setMusicPageVisible(visible: Boolean, state: MusicState? = null) {
+        val wasVisible = isMusicPageVisible
+        isMusicPageVisible = visible
+        if (state != null) {
+            musicState = state
+        }
+        if (!wasVisible && visible) {
+            notifyItemInserted(1)
+        } else if (wasVisible && !visible) {
+            notifyItemRemoved(1)
+        } else if (visible) {
+            notifyItemChanged(1)
+        }
+    }
+
+    fun updateMusicState(state: MusicState) {
+        musicState = state
+        if (isMusicPageVisible) {
+            notifyItemChanged(1)
+        }
     }
 
     fun setBoards(newBoards: List<BoardModel>) {
@@ -51,7 +84,8 @@ class MainPagerAdapter(
             val mutable = boards.toMutableList()
             mutable[index] = board
             boards = mutable
-            notifyItemChanged(index + 1)
+            val adapterPosition = if (isMusicPageVisible) index + 2 else index + 1
+            notifyItemChanged(adapterPosition)
         } else {
             val mutable = boards.toMutableList()
             mutable.add(board)
@@ -60,45 +94,66 @@ class MainPagerAdapter(
         }
     }
 
-    override fun getItemCount(): Int = 1 + boards.size
+    override fun getItemCount(): Int {
+        val base = 1 + boards.size
+        return if (isMusicPageVisible) base + 1 else base
+    }
 
     override fun getItemViewType(position: Int): Int {
-        return if (position == 0) VIEW_TYPE_HOME else VIEW_TYPE_BOARD
+        if (position == 0) return VIEW_TYPE_HOME
+        if (isMusicPageVisible) {
+            if (position == 1) return VIEW_TYPE_MUSIC
+            return VIEW_TYPE_BOARD
+        }
+        return VIEW_TYPE_BOARD
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
         val inflater = LayoutInflater.from(parent.context)
-        return if (viewType == VIEW_TYPE_HOME) {
-            val view = inflater.inflate(R.layout.fragment_home, parent, false)
-            HomeViewHolder(view, onWakeInteraction)
-        } else {
-            val view = inflater.inflate(R.layout.fragment_board, parent, false)
-            BoardViewHolder(view, onItemToggle)
+        return when (viewType) {
+            VIEW_TYPE_HOME -> {
+                val view = inflater.inflate(R.layout.fragment_home, parent, false)
+                HomeViewHolder(view, onWakeInteraction)
+            }
+            VIEW_TYPE_MUSIC -> {
+                val view = inflater.inflate(R.layout.fragment_music, parent, false)
+                MusicViewHolder(view, onMediaControl, onOpenNotificationSettings)
+            }
+            else -> {
+                val view = inflater.inflate(R.layout.fragment_board, parent, false)
+                BoardViewHolder(view, onItemToggle)
+            }
         }
     }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
-        if (holder is HomeViewHolder) {
-            holder.bind()
-        } else if (holder is BoardViewHolder) {
-            val boardIndex = position - 1
-            if (boardIndex in boards.indices) {
-                holder.bind(boards[boardIndex])
+        when (holder) {
+            is HomeViewHolder -> holder.bind()
+            is MusicViewHolder -> {
+                musicState?.let { holder.bind(it) }
+            }
+            is BoardViewHolder -> {
+                val boardIndex = if (isMusicPageVisible) position - 2 else position - 1
+                if (boardIndex in boards.indices) {
+                    holder.bind(boards[boardIndex])
+                }
             }
         }
     }
 
     override fun onViewAttachedToWindow(holder: RecyclerView.ViewHolder) {
         super.onViewAttachedToWindow(holder)
-        if (holder is HomeViewHolder) {
-            holder.onAttached()
+        when (holder) {
+            is HomeViewHolder -> holder.onAttached()
+            is MusicViewHolder -> holder.onAttached()
         }
     }
 
     override fun onViewDetachedFromWindow(holder: RecyclerView.ViewHolder) {
         super.onViewDetachedFromWindow(holder)
-        if (holder is HomeViewHolder) {
-            holder.onDetached()
+        when (holder) {
+            is HomeViewHolder -> holder.onDetached()
+            is MusicViewHolder -> holder.onDetached()
         }
     }
 

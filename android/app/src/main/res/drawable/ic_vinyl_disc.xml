@@ -1,0 +1,56 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="200"
+    android:viewportHeight="200">
+    <!-- Vinyl Outer Body -->
+    <path
+        android:fillColor="#111113"
+        android:strokeColor="#27272A"
+        android:strokeWidth="2"
+        android:pathData="M100,100 m-96,0 a96,96 0 1,0 192,0 a96,96 0 1,0 -192,0" />
+    <!-- Grooves (Concentric Circles) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#222226"
+        android:strokeWidth="1.2"
+        android:pathData="M100,100 m-84,0 a84,84 0 1,0 168,0 a84,84 0 1,0 -168,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#1E1E22"
+        android:strokeWidth="1.2"
+        android:pathData="M100,100 m-74,0 a74,74 0 1,0 148,0 a74,74 0 1,0 -148,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#222226"
+        android:strokeWidth="1.2"
+        android:pathData="M100,100 m-64,0 a64,64 0 1,0 128,0 a64,64 0 1,0 -128,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#1E1E22"
+        android:strokeWidth="1.2"
+        android:pathData="M100,100 m-54,0 a54,54 0 1,0 108,0 a54,54 0 1,0 -108,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#222226"
+        android:strokeWidth="1.2"
+        android:pathData="M100,100 m-44,0 a44,44 0 1,0 88,0 a44,44 0 1,0 -88,0" />
+    <!-- Center Label Disc -->
+    <path
+        android:fillColor="#1E293B"
+        android:strokeColor="#06B6D4"
+        android:strokeWidth="1.5"
+        android:pathData="M100,100 m-32,0 a32,32 0 1,0 64,0 a32,32 0 1,0 -64,0" />
+    <!-- Center Ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="1"
+        android:pathData="M100,100 m-20,0 a20,20 0 1,0 40,0 a20,20 0 1,0 -40,0" />
+    <!-- Center Spindle Hole -->
+    <path
+        android:fillColor="#000000"
+        android:strokeColor="#475569"
+        android:strokeWidth="1.5"
+        android:pathData="M100,100 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+</vector>
