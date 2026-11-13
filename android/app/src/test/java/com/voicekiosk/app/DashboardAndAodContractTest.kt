@@ -96,11 +96,9 @@ class DashboardAndAodContractTest {
         assertTrue("PetAvatarView bottomMargin 44dp", content.contains("dpToPx(44)"))
         assertTrue("Must set OnPetTappedListener", content.contains("setOnPetTappedListener"))
 
-        // Conversation HUD views
-        assertTrue("Must declare conversationHudLayout", content.contains("conversationHudLayout"))
-        assertTrue("Must declare userSpeechView", content.contains("userSpeechView"))
-        assertTrue("Must declare replyCardView", content.contains("replyCardView"))
-        assertTrue("Must declare wakeBanner", content.contains("wakeBanner"))
+        // Voice listening overlay views
+        assertTrue("Must declare listeningOverlayContainer", content.contains("listeningOverlayContainer"))
+        assertTrue("Must declare voiceOverlay", content.contains("voiceOverlay"))
 
         // Touch wake duration and handler
         assertTrue("TOUCH_WAKE_DURATION_MS must be 8000L", content.contains("TOUCH_WAKE_DURATION_MS = 8000L"))

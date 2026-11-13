@@ -48,6 +48,42 @@ class MainPagerAdapter(
 
     private var musicState: MusicState? = null
     private var isMusicPageVisible: Boolean = false
+    private val boardIdMap = mutableMapOf<String, Long>()
+    private var nextBoardLongId = 100L
+
+    init {
+        setHasStableIds(true)
+    }
+
+    private fun getStableBoardId(boardId: String): Long {
+        return boardIdMap.getOrPut(boardId) { nextBoardLongId++ }
+    }
+
+    override fun getItemId(position: Int): Long {
+        if (position == 0) return 0L
+        if (isMusicPageVisible) {
+            if (position == 1) return 1L
+            val boardIndex = position - 2
+            return if (boardIndex in boards.indices) {
+                getStableBoardId(boards[boardIndex].boardId)
+            } else {
+                RecyclerView.NO_ID
+            }
+        } else {
+            val boardIndex = position - 1
+            return if (boardIndex in boards.indices) {
+                getStableBoardId(boards[boardIndex].boardId)
+            } else {
+                RecyclerView.NO_ID
+            }
+        }
+    }
+
+    fun getBoardPagePosition(boardId: String): Int {
+        val index = boards.indexOfFirst { it.boardId == boardId }
+        if (index == -1) return -1
+        return if (isMusicPageVisible) index + 2 else index + 1
+    }
 
     fun isMusicPageVisible(): Boolean = isMusicPageVisible
 
@@ -157,6 +193,14 @@ class MainPagerAdapter(
         }
     }
 
+    override fun onViewRecycled(holder: RecyclerView.ViewHolder) {
+        super.onViewRecycled(holder)
+        when (holder) {
+            is HomeViewHolder -> holder.onDetached()
+            is MusicViewHolder -> holder.onDetached()
+        }
+    }
+
     class BoardViewHolder(
         itemView: View,
         private val onItemToggle: ((boardId: String, itemId: String, completed: Boolean) -> Unit)?
@@ -193,12 +237,16 @@ class MainPagerAdapter(
 
             // Adaptive layout: 2-column grid in landscape (screenshot 5), single column in portrait (screenshot 2)
             val isLandscape = itemView.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-            val layoutManager = if (isLandscape) {
-                GridLayoutManager(itemView.context, 2)
-            } else {
-                LinearLayoutManager(itemView.context)
+            val currentLm = rvBoardContent.layoutManager
+            val needsGrid = isLandscape
+            val isCurrentlyGrid = currentLm is GridLayoutManager
+            if (currentLm == null || (needsGrid != isCurrentlyGrid)) {
+                rvBoardContent.layoutManager = if (isLandscape) {
+                    GridLayoutManager(itemView.context, 2)
+                } else {
+                    LinearLayoutManager(itemView.context)
+                }
             }
-            rvBoardContent.layoutManager = layoutManager
 
             // Flatten board components to display items
             val displayItems = mutableListOf<BoardItemDisplay>()
@@ -222,22 +270,26 @@ class MainPagerAdapter(
                 }
             }
 
-            var adapter: TaskCardAdapter? = null
-            adapter = TaskCardAdapter(
-                boardId = board.boardId,
-                items = displayItems,
-                onItemToggle = { itemId, completed ->
-                    // Immediate local update of header badge
-                    val total = adapter?.getTaskCount() ?: 0
-                    val compCount = adapter?.getCompletedTaskCount() ?: 0
-                    if (total > 0) {
-                        tvBoardBadge.text = "$compCount / $total 完成"
-                        tvBoardBadge.visibility = View.VISIBLE
+            val existingAdapter = rvBoardContent.adapter as? TaskCardAdapter
+            if (existingAdapter != null && existingAdapter.boardId == board.boardId) {
+                existingAdapter.updateItems(displayItems)
+            } else {
+                val newAdapter = TaskCardAdapter(
+                    boardId = board.boardId,
+                    items = displayItems,
+                    onItemToggle = { itemId, completed ->
+                        val currentAdapter = rvBoardContent.adapter as? TaskCardAdapter
+                        val total = currentAdapter?.getTaskCount() ?: 0
+                        val compCount = currentAdapter?.getCompletedTaskCount() ?: 0
+                        if (total > 0) {
+                            tvBoardBadge.text = "$compCount / $total 完成"
+                            tvBoardBadge.visibility = View.VISIBLE
+                        }
+                        onItemToggle?.invoke(board.boardId, itemId, completed)
                     }
-                    onItemToggle?.invoke(board.boardId, itemId, completed)
-                }
-            )
-            rvBoardContent.adapter = adapter
+                )
+                rvBoardContent.adapter = newAdapter
+            }
         }
     }
 

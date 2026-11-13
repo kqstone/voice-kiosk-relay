@@ -293,6 +293,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
                 override fun onBoardUpdated(board: BoardModel) {
                     mainHandler.post {
                         pagerAdapter.updateBoard(board)
+                        pageIndicator.setPageCount(pagerAdapter.itemCount)
                     }
                 }
             })
@@ -793,7 +794,12 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
 
     override fun onFocusBoard(boardId: String) {
         Log.i(TAG, "UI received focus board event: '$boardId'")
-        // Handled in Phase 4 for dynamic board page selection
+        mainHandler.post {
+            val pos = pagerAdapter.getBoardPagePosition(boardId)
+            if (pos >= 0) {
+                viewPager.setCurrentItem(pos, true)
+            }
+        }
     }
 
     override fun onBridgeNotice(text: String) {
@@ -915,13 +921,19 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         isConversationActive = false
         mainHandler.removeCallbacks(wakeSurpriseToListeningRunnable)
         mainHandler.removeCallbacks(resetWakeStateRunnable)
-        if (::voiceOverlay.isInitialized) {
-            voiceOverlay.dismiss()
+        if (::voiceOverlay.isInitialized && voiceOverlay.visibility == View.VISIBLE) {
+            voiceOverlay.dismiss {
+                if (::listeningOverlayContainer.isInitialized) {
+                    listeningOverlayContainer.visibility = View.GONE
+                }
+                updateDisplayPowerAndAodState()
+            }
+        } else {
+            if (::listeningOverlayContainer.isInitialized) {
+                listeningOverlayContainer.visibility = View.GONE
+            }
+            updateDisplayPowerAndAodState()
         }
-        if (::listeningOverlayContainer.isInitialized) {
-            listeningOverlayContainer.visibility = View.GONE
-        }
-        updateDisplayPowerAndAodState()
     }
 
     private fun dpToPx(dp: Int): Int {

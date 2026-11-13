@@ -212,8 +212,11 @@ class VoiceListeningOverlayView @JvmOverloads constructor(
         startBreathingAnimation()
     }
 
-    fun dismiss() {
-        if (visibility != View.VISIBLE) return
+    fun dismiss(onDismissed: (() -> Unit)? = null) {
+        if (visibility != View.VISIBLE) {
+            onDismissed?.invoke()
+            return
+        }
         stopBreathingAnimation()
         animate()
             .alpha(0f)
@@ -221,6 +224,7 @@ class VoiceListeningOverlayView @JvmOverloads constructor(
             .withEndAction {
                 visibility = View.GONE
                 onCloseAction?.invoke()
+                onDismissed?.invoke()
             }
             .start()
     }

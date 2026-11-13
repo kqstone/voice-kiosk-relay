@@ -31,10 +31,16 @@ sealed class BoardItemDisplay {
  * Contains ZERO hardcoded domain or subject strings.
  */
 class TaskCardAdapter(
-    private val boardId: String,
+    val boardId: String,
     private val items: MutableList<BoardItemDisplay>,
     private val onItemToggle: (itemId: String, completed: Boolean) -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+
+    fun updateItems(newItems: List<BoardItemDisplay>) {
+        items.clear()
+        items.addAll(newItems)
+        notifyDataSetChanged()
+    }
 
     companion object {
         const val VIEW_TYPE_TASK = 1

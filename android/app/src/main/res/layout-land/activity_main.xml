@@ -44,13 +44,6 @@
         android:textColor="@color/text_white"
         android:textSize="13sp" />
 
-    <!-- Container for Voice Listening Overlay (Phase 6 will populate this) -->
-    <FrameLayout
-        android:id="@+id/listeningOverlayContainer"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:visibility="gone" />
-
     <!-- OLED Night Mode dimming overlay -->
     <View
         android:id="@+id/nightOverlayView"
@@ -60,6 +53,13 @@
         android:alpha="0.0"
         android:clickable="false"
         android:focusable="false"
+        android:visibility="gone" />
+
+    <!-- Container for Voice Listening Overlay (Phase 6) -->
+    <FrameLayout
+        android:id="@+id/listeningOverlayContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
         android:visibility="gone" />
 
 </FrameLayout>

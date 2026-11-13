@@ -61,6 +61,10 @@ class PageIndicatorView @JvmOverloads constructor(
         val coerced = count.coerceAtLeast(0)
         if (pageCount != coerced) {
             pageCount = coerced
+            if (selectedPosition >= pageCount) {
+                selectedPosition = (pageCount - 1).coerceAtLeast(0)
+                positionOffset = 0f
+            }
             requestLayout()
             invalidate()
         }

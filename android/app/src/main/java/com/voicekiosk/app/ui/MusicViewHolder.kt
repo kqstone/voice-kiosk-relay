@@ -216,6 +216,8 @@ class MusicViewHolder(
 
     fun onDetached() {
         pauseDiscAnimation()
+        discAnimator?.cancel()
+        discAnimator = null
         mainHandler.removeCallbacks(progressUpdateRunnable)
     }
 }
