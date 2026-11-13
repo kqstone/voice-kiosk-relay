@@ -103,7 +103,39 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         const val ACTION_START = "com.voicekiosk.app.action.START"
         const val ACTION_STOP = "com.voicekiosk.app.action.STOP"
         const val ACTION_META_HANDSHAKE = "com.voicekiosk.app.action.META_HANDSHAKE"
+        const val ACTION_SIMULATE_UTTERANCE = "com.voicekiosk.app.action.SIMULATE_UTTERANCE"
+        const val EXTRA_UTTERANCE_TEXT = "com.voicekiosk.app.extra.UTTERANCE_TEXT"
         const val HOST_SPEAK_MAX_CHARS = 200
+
+        @Volatile
+        private var instance: VoiceKioskService? = null
+
+        fun simulateUserUtterance(text: String) {
+            val inst = instance
+            if (inst != null) {
+                inst.handleSimulatedUtterance(text)
+            } else {
+                Log.w(TAG, "simulateUserUtterance: VoiceKioskService instance not active")
+                WakeWordEventBus.emitAsrFinalResult(text)
+            }
+        }
+
+        fun simulateUserUtterance(context: Context, text: String) {
+            val inst = instance
+            if (inst != null) {
+                inst.handleSimulatedUtterance(text)
+            } else {
+                val intent = Intent(context, VoiceKioskService::class.java).apply {
+                    action = ACTION_SIMULATE_UTTERANCE
+                    putExtra(EXTRA_UTTERANCE_TEXT, text)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            }
+        }
 
         @Volatile
         private var hostSpeakHandler: ((String) -> Unit)? = null
@@ -242,6 +274,7 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "Initializing VoiceKioskService...")
+        instance = this
 
         acquireLocks()
         initToneGenerator()
@@ -258,6 +291,12 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
                 stopForeground(true)
                 stopSelf()
                 return START_NOT_STICKY
+            }
+            ACTION_SIMULATE_UTTERANCE -> {
+                val text = intent.getStringExtra(EXTRA_UTTERANCE_TEXT).orEmpty()
+                if (text.isNotEmpty()) {
+                    handleSimulatedUtterance(text)
+                }
             }
             ACTION_META_HANDSHAKE -> {
                 checkBridgeHealth()
@@ -277,6 +316,9 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         Log.i(TAG, "Destroying VoiceKioskService...")
+        if (instance === this) {
+            instance = null
+        }
         hostSpeakHandler = null
         stopRecording()
         teardownOnDeviceRouting()
@@ -731,7 +773,45 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         Log.i(TAG, "Exited voice pipeline audio loop")
     }
 
-    private fun drainAudioSamples(record: AudioRecord, buffer: ShortArray, durationMs: Long) {
+    @Volatile
+    private var simulatedUtterance: String? = null
+
+    fun handleSimulatedUtterance(text: String) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        Log.i(TAG, "Handling simulated user utterance: '$trimmed'")
+
+        // If ASR is currently actively listening in the audio loop, inject directly
+        if (pipelineState == PipelineState.ASR_LISTENING) {
+            simulatedUtterance = trimmed
+            return
+        }
+
+        // Otherwise (KWS listening or idle), run through the turn orchestrator on a daemon thread
+        thread(name = "VoiceKiosk-SimulatedUtterance", isDaemon = true) {
+            try {
+                routerModel?.cancelExclusive()
+                WakeWordEventBus.emitWakeWord("模拟指令")
+                WakeWordEventBus.emitAsrFinalResult(trimmed)
+                chatAndSpeakTurn(audioRecord, null, trimmed)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error processing simulated utterance", e)
+            } finally {
+                pipelineState = PipelineState.KWS_LISTENING
+                WakeWordEventBus.emitStateChanged(pipelineState.name)
+            }
+        }
+    }
+
+    private fun drainAudioSamples(record: AudioRecord?, buffer: ShortArray?, durationMs: Long) {
+        if (record == null || buffer == null) {
+            try {
+                Thread.sleep(durationMs.coerceAtLeast(0L))
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+            return
+        }
         val end = System.currentTimeMillis() + durationMs
         while (isRecording && System.currentTimeMillis() < end) {
             record.read(buffer, 0, buffer.size)
@@ -857,6 +937,13 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
             )
 
             while (isRecording) {
+                val sim = simulatedUtterance
+                if (sim != null) {
+                    simulatedUtterance = null
+                    Log.i(TAG, "Simulated utterance injected during ASR: '$sim'")
+                    return sim
+                }
+
                 val now = System.currentTimeMillis()
                 val elapsed = now - startTimeMs
                 if (elapsed >= AppConfig.ASR_MAX_DURATION_MS) {
@@ -935,8 +1022,8 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun chatAndSpeakTurn(
-        record: AudioRecord,
-        shortBuffer: ShortArray,
+        record: AudioRecord?,
+        shortBuffer: ShortArray?,
         recognizedText: String
     ): TurnOutcome {
         pipelineState = PipelineState.SPEAKING
@@ -1099,8 +1186,8 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
 
     private fun orchestratedTurn(
         orch: TurnOrchestrator,
-        record: AudioRecord,
-        shortBuffer: ShortArray,
+        record: AudioRecord?,
+        shortBuffer: ShortArray?,
         recognizedText: String
     ): TurnOutcome {
         val result = try {
@@ -1175,8 +1262,8 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
      * thread until answered, timed out, or 2 minutes elapse.
      */
     private fun handleMuseWaitingTurn(
-        record: AudioRecord,
-        shortBuffer: ShortArray,
+        record: AudioRecord?,
+        shortBuffer: ShortArray?,
         ackReply: String,
         conversationId: String,
         speakAck: Boolean
@@ -1208,7 +1295,9 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         while (isRecording && (System.currentTimeMillis() - startTime) < ConversationPoller.MAX_WAIT_MS) {
             val pollSleepEnd = System.currentTimeMillis() + ConversationPoller.POLL_INTERVAL_MS
             while (isRecording && System.currentTimeMillis() < pollSleepEnd) {
-                record.read(shortBuffer, 0, shortBuffer.size)
+                if (record != null && shortBuffer != null) {
+                    record.read(shortBuffer, 0, shortBuffer.size)
+                }
                 try {
                     Thread.sleep(50L)
                 } catch (_: InterruptedException) {

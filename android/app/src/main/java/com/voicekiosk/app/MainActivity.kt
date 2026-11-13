@@ -48,6 +48,7 @@ import com.voicekiosk.app.media.MusicState
 import com.voicekiosk.app.media.MusicStateManager
 import com.voicekiosk.app.ui.MainPagerAdapter
 import com.voicekiosk.app.ui.PageIndicatorView
+import com.voicekiosk.app.ui.VoiceListeningOverlayView
 import android.content.res.Configuration
 import java.util.Calendar
 import java.util.Random
@@ -89,13 +90,10 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     private lateinit var settingsButton: TextView
     private lateinit var listeningOverlayContainer: FrameLayout
     private lateinit var nightOverlayView: View
+    private lateinit var voiceOverlay: VoiceListeningOverlayView
 
-    // Preserved Conversation HUD views (used during voice listening until Phase 6 overlay)
+    // Preserved pet avatar view for AOD standby
     private lateinit var petAvatarView: PetAvatarView
-    private lateinit var conversationHudLayout: LinearLayout
-    private lateinit var wakeBanner: TextView
-    private lateinit var userSpeechView: TextView
-    private lateinit var replyCardView: TextView
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val random = Random()
@@ -228,6 +226,9 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
 
     override fun onDestroy() {
         Log.i(TAG, "MainActivity onDestroy")
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.release()
+        }
         if (::musicStateManager.isInitialized) {
             musicStateManager.stop()
         }
@@ -299,7 +300,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
 
         pagerAdapter = MainPagerAdapter(
             boards = emptyList(),
-            onWakeInteraction = { onUserInteractionWake() },
+            onWakeInteraction = { triggerVoiceWakeFromUi() },
             onItemToggle = { boardId, itemId, completed ->
                 boardRepository.toggleItem(boardId, itemId, completed)
             },
@@ -332,14 +333,29 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             startActivity(intent)
         }
 
-        // 3. Setup conversation HUD views in listeningOverlayContainer for voice interaction continuity
-        setupConversationHudViews()
+        // 3. Setup Phase 6 Voice Listening Overlay
+        setupVoiceListeningOverlay()
 
         // Compatibility JS hook initialization
         setupJsBridgeCompatibility()
     }
 
-    private fun setupConversationHudViews() {
+    private fun triggerVoiceWakeFromUi() {
+        onUserInteractionWake()
+        onWakeWordDetected(AppConfig.getWakeWord(this))
+    }
+
+    private fun handleSuggestionChipClicked(phrase: String) {
+        Log.i(TAG, "Suggestion chip tapped: '$phrase'")
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.setStatus("正在识别...", isAmber = false)
+            voiceOverlay.setSpeechText("“$phrase”")
+        }
+        VoiceKioskService.simulateUserUtterance(this, phrase)
+    }
+
+    private fun setupVoiceListeningOverlay() {
+        // Preserved pet avatar view for AOD standby
         petAvatarView = PetAvatarView(this).apply {
             val size = dpToPx(210)
             layoutParams = FrameLayout.LayoutParams(size, size).apply {
@@ -349,99 +365,25 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             setOnPetTappedListener {
                 onUserInteractionWake()
             }
+            visibility = if (AppConfig.isPetAvatarEnabled(this@MainActivity)) View.VISIBLE else View.GONE
         }
-        listeningOverlayContainer.addView(petAvatarView)
+        contentShiftContainer.addView(petAvatarView)
 
-        val hudMaxWidth = (resources.displayMetrics.widthPixels * 0.86f).toInt()
-        conversationHudLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            val lp = FrameLayout.LayoutParams(
-                if (hudMaxWidth > 0) hudMaxWidth else FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                bottomMargin = dpToPx(250)
-            }
-            layoutParams = lp
+        // Phase 6 Voice Listening Overlay
+        voiceOverlay = VoiceListeningOverlayView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
             visibility = View.GONE
+            setOnCloseListener {
+                resetWakeUiState()
+            }
+            setOnChipClickListener { phrase ->
+                handleSuggestionChipClicked(phrase)
+            }
         }
-
-        wakeBanner = TextView(this).apply {
-            val padH = dpToPx(16)
-            val padV = dpToPx(6)
-            setPadding(padH, padV, padH, padV)
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            typeface = Typeface.DEFAULT_BOLD
-            text = "我在听..."
-            gravity = Gravity.CENTER
-
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                gravity = Gravity.CENTER_HORIZONTAL
-            }
-            layoutParams = lp
-            visibility = View.GONE
-        }
-        conversationHudLayout.addView(wakeBanner)
-
-        userSpeechView = TextView(this).apply {
-            val padH = dpToPx(14)
-            val padV = dpToPx(8)
-            setPadding(padH, padV, padH, padV)
-            setTextColor(Color.parseColor("#E2E8F0"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dpToPx(16).toFloat()
-                setColor(Color.parseColor("#CC0F172A"))
-                setStroke(dpToPx(1), Color.parseColor("#38BDF8"))
-            }
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                gravity = Gravity.CENTER_HORIZONTAL
-                topMargin = dpToPx(8)
-            }
-            layoutParams = lp
-            visibility = View.GONE
-        }
-        conversationHudLayout.addView(userSpeechView)
-
-        replyCardView = TextView(this).apply {
-            val padH = dpToPx(18)
-            val padV = dpToPx(12)
-            setPadding(padH, padV, padH, padV)
-            setTextColor(Color.parseColor("#F8FAFC"))
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
-            setLineSpacing(0f, 1.25f)
-            maxLines = 6
-            ellipsize = TextUtils.TruncateAt.END
-            gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dpToPx(18).toFloat()
-                setColor(Color.parseColor("#E61E293B"))
-                setStroke(dpToPx(1.5f).coerceAtLeast(1), Color.parseColor("#6366F1"))
-            }
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                gravity = Gravity.CENTER_HORIZONTAL
-                topMargin = dpToPx(8)
-            }
-            layoutParams = lp
-            visibility = View.GONE
-        }
-        conversationHudLayout.addView(replyCardView)
-
-        listeningOverlayContainer.addView(conversationHudLayout)
+        listeningOverlayContainer.addView(voiceOverlay)
     }
 
     private fun setupJsBridgeCompatibility() {
@@ -508,20 +450,11 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
                 settingsButton.visibility = View.GONE
             }
 
+            if (::voiceOverlay.isInitialized) {
+                voiceOverlay.dismiss()
+            }
             if (::listeningOverlayContainer.isInitialized) {
                 listeningOverlayContainer.visibility = View.GONE
-            }
-            if (::conversationHudLayout.isInitialized) {
-                conversationHudLayout.visibility = View.GONE
-            }
-            if (::wakeBanner.isInitialized) {
-                wakeBanner.visibility = View.GONE
-            }
-            if (::userSpeechView.isInitialized) {
-                userSpeechView.visibility = View.GONE
-            }
-            if (::replyCardView.isInitialized) {
-                replyCardView.visibility = View.GONE
             }
 
             if (::petAvatarView.isInitialized) {
@@ -599,13 +532,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         }
         if (::settingsButton.isInitialized) {
             settingsButton.animate()
-                .translationX(offsetX)
-                .translationY(offsetY)
-                .setDuration(900L)
-                .start()
-        }
-        if (::conversationHudLayout.isInitialized) {
-            conversationHudLayout.animate()
                 .translationX(offsetX)
                 .translationY(offsetY)
                 .setDuration(900L)
@@ -739,8 +665,11 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         if (::listeningOverlayContainer.isInitialized) {
             listeningOverlayContainer.visibility = View.VISIBLE
         }
-        if (::userSpeechView.isInitialized) userSpeechView.visibility = View.GONE
-        if (::replyCardView.isInitialized) replyCardView.visibility = View.GONE
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.show()
+            voiceOverlay.setStatus("正在聆听...", isAmber = false)
+            voiceOverlay.setSpeechText("“请讲，我在听...”")
+        }
 
         if (::petAvatarView.isInitialized) {
             petAvatarView.setPetState(PetAvatarView.PetState.WAKE_SURPRISE)
@@ -750,8 +679,6 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         mainHandler.postDelayed(wakeSurpriseToListeningRunnable, WAKE_SURPRISE_DURATION_MS)
 
         updateDisplayPowerAndAodState()
-        showBanner("我在听...", "#10B981", "#34D399")
-
         mainHandler.removeCallbacks(resetWakeStateRunnable)
     }
 
@@ -768,14 +695,21 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             if (::listeningOverlayContainer.isInitialized) {
                 listeningOverlayContainer.visibility = View.VISIBLE
             }
+            if (::voiceOverlay.isInitialized) {
+                voiceOverlay.show()
+                voiceOverlay.setStatus(statusText, isAmber = false)
+            }
             updateDisplayPowerAndAodState()
-            showBanner(statusText, "#2563EB", "#60A5FA")
         } else if (progressPercent == 100) {
-            showBanner(statusText, "#10B981", "#34D399")
+            if (::voiceOverlay.isInitialized) {
+                voiceOverlay.setStatus(statusText, isAmber = false)
+            }
             mainHandler.removeCallbacks(resetWakeStateRunnable)
             mainHandler.postDelayed(resetWakeStateRunnable, WAKE_STATE_DURATION_MS)
         } else if (progressPercent < 0) {
-            showBanner(statusText, "#DC2626", "#F87171")
+            if (::voiceOverlay.isInitialized) {
+                voiceOverlay.setStatus(statusText, isAmber = true)
+            }
             mainHandler.removeCallbacks(resetWakeStateRunnable)
             mainHandler.postDelayed(resetWakeStateRunnable, 5000L)
         }
@@ -786,13 +720,13 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             if (::listeningOverlayContainer.isInitialized) {
                 listeningOverlayContainer.visibility = View.VISIBLE
             }
+            if (::voiceOverlay.isInitialized) {
+                voiceOverlay.show()
+                voiceOverlay.setStatus("正在聆听...", isAmber = false)
+                voiceOverlay.setSpeechText("“$text”")
+            }
             if (::petAvatarView.isInitialized) {
                 petAvatarView.setPetState(PetAvatarView.PetState.LISTENING)
-            }
-            if (::userSpeechView.isInitialized && ::conversationHudLayout.isInitialized) {
-                userSpeechView.text = "🎙 你说：$text ..."
-                userSpeechView.visibility = View.VISIBLE
-                conversationHudLayout.visibility = View.VISIBLE
             }
         }
     }
@@ -803,22 +737,23 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             listeningOverlayContainer.visibility = View.VISIBLE
         }
         if (text.isEmpty()) {
+            if (::voiceOverlay.isInitialized) {
+                voiceOverlay.setStatus("未听清", isAmber = true)
+                voiceOverlay.setSpeechText("未听清，请重试")
+            }
             if (::petAvatarView.isInitialized) {
                 petAvatarView.setPetState(PetAvatarView.PetState.CONFUSED)
             }
-            showBanner("未听清，请再唤醒一次", "#6B7280", "#9CA3AF")
             mainHandler.removeCallbacks(resetWakeStateRunnable)
             mainHandler.postDelayed(resetWakeStateRunnable, WAKE_STATE_DURATION_MS)
         } else {
+            if (::voiceOverlay.isInitialized) {
+                voiceOverlay.setStatus("思考中...", isAmber = false)
+                voiceOverlay.setSpeechText("“$text”")
+            }
             if (::petAvatarView.isInitialized) {
                 petAvatarView.setPetState(PetAvatarView.PetState.THINKING)
             }
-            if (::userSpeechView.isInitialized && ::conversationHudLayout.isInitialized) {
-                userSpeechView.text = "🎙 你说：$text"
-                userSpeechView.visibility = View.VISIBLE
-                conversationHudLayout.visibility = View.VISIBLE
-            }
-            showBanner("思考中...", "#0284C7", "#38BDF8")
         }
     }
 
@@ -827,11 +762,16 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         if (::listeningOverlayContainer.isInitialized) {
             listeningOverlayContainer.visibility = View.VISIBLE
         }
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.show()
+            voiceOverlay.setStatus("回答完毕", isAmber = false)
+            voiceOverlay.setReply(replyText, isError = false)
+        }
         if (::petAvatarView.isInitialized) {
             petAvatarView.setPetState(PetAvatarView.PetState.SPEAKING)
         }
-        showBanner("正在回答...", "#4F46E5", "#818CF8")
-        showReplyCard(replyText, isError = false)
+        mainHandler.removeCallbacks(resetWakeStateRunnable)
+        mainHandler.postDelayed(resetWakeStateRunnable, 4000L)
     }
 
     override fun onWaitingForMuse(statusText: String) {
@@ -840,11 +780,14 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         if (::listeningOverlayContainer.isInitialized) {
             listeningOverlayContainer.visibility = View.VISIBLE
         }
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.show()
+            voiceOverlay.setStatus("等待 Muse 回复中...", isAmber = true)
+            voiceOverlay.setSpeechText(statusText.ifEmpty { "正在思考..." })
+        }
         if (::petAvatarView.isInitialized) {
             petAvatarView.setPetState(PetAvatarView.PetState.THINKING)
         }
-        showBanner("等待回复中...", "#D97706", "#FBBF24")
-        showReplyCard(statusText, isError = false)
         mainHandler.removeCallbacks(resetWakeStateRunnable)
     }
 
@@ -898,11 +841,14 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         if (::listeningOverlayContainer.isInitialized) {
             listeningOverlayContainer.visibility = View.VISIBLE
         }
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.show()
+            voiceOverlay.setStatus("⚠ 离线提示", isAmber = true)
+            voiceOverlay.setReply(errorMessage, isError = true)
+        }
         if (::petAvatarView.isInitialized) {
             petAvatarView.setPetState(PetAvatarView.PetState.ERROR)
         }
-        showBanner("⚠ 离线提示", "#DC2626", "#F87171")
-        showReplyCard(errorMessage, isError = true)
         mainHandler.removeCallbacks(resetWakeStateRunnable)
         mainHandler.postDelayed(resetWakeStateRunnable, 5000L)
     }
@@ -913,21 +859,21 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         if (::listeningOverlayContainer.isInitialized) {
             listeningOverlayContainer.visibility = View.VISIBLE
         }
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.show()
+            voiceOverlay.setStatus("对话中，继续说...", isAmber = false)
+            voiceOverlay.setSpeechText("“请讲，我在听...”")
+        }
         if (::petAvatarView.isInitialized) {
             petAvatarView.setPetState(PetAvatarView.PetState.FOLLOW_UP)
         }
-        showBanner("对话中，继续说...", "#10B981", "#34D399")
         mainHandler.removeCallbacks(resetWakeStateRunnable)
     }
 
     override fun onStateChanged(state: String) {
         if (state == VoiceKioskService.PipelineState.KWS_LISTENING.name) {
-            val currentText = if (::wakeBanner.isInitialized) wakeBanner.text?.toString().orEmpty() else ""
-            val isErrorOrNotice = currentText.startsWith("⚠") || currentText.startsWith("未听清")
-            if (!isErrorOrNotice) {
-                mainHandler.removeCallbacks(resetWakeStateRunnable)
-                mainHandler.postDelayed(resetWakeStateRunnable, WAKE_STATE_DURATION_MS)
-            }
+            mainHandler.removeCallbacks(resetWakeStateRunnable)
+            mainHandler.postDelayed(resetWakeStateRunnable, WAKE_STATE_DURATION_MS)
         }
     }
 
@@ -945,59 +891,32 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         settingsButton.text = if (hasAvailableUpdate) "⚙ 设置 ●" else "⚙ 设置"
     }
 
-    private fun showBanner(message: String, bgColorHex: String, borderColorHex: String) {
-        if (!::wakeBanner.isInitialized || !::conversationHudLayout.isInitialized) return
-        wakeBanner.text = message
-        wakeBanner.visibility = View.VISIBLE
-        val bgDrawable = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dpToPx(18).toFloat()
-            setColor(Color.parseColor(bgColorHex))
-            setStroke(dpToPx(1.5f).coerceAtLeast(1), Color.parseColor(borderColorHex))
+    private fun showBanner(message: String, isAmber: Boolean = false) {
+        if (::listeningOverlayContainer.isInitialized) {
+            listeningOverlayContainer.visibility = View.VISIBLE
         }
-        wakeBanner.background = bgDrawable
-        conversationHudLayout.visibility = View.VISIBLE
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.show()
+            voiceOverlay.setStatus(message, isAmber = isAmber)
+        }
     }
 
     private fun showReplyCard(replyText: String, isError: Boolean = false) {
-        if (!::replyCardView.isInitialized || !::conversationHudLayout.isInitialized) return
-        replyCardView.text = replyText
-        val bgColor = Color.parseColor("#E61E293B")
-        val strokeColor = if (isError) Color.parseColor("#DC2626") else Color.parseColor("#6366F1")
-        val textColor = if (isError) Color.parseColor("#FCA5A5") else Color.parseColor("#F8FAFC")
-        replyCardView.setTextColor(textColor)
-        replyCardView.background = GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = dpToPx(18).toFloat()
-            setColor(bgColor)
-            setStroke(dpToPx(1.5f).coerceAtLeast(1), strokeColor)
+        if (::listeningOverlayContainer.isInitialized) {
+            listeningOverlayContainer.visibility = View.VISIBLE
         }
-        replyCardView.visibility = View.VISIBLE
-        conversationHudLayout.visibility = View.VISIBLE
-
-        replyCardView.alpha = 0f
-        replyCardView.translationY = dpToPx(12).toFloat()
-        replyCardView.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setDuration(240L)
-            .start()
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.show()
+            voiceOverlay.setReply(replyText, isError = isError)
+        }
     }
 
     private fun resetWakeUiState() {
         isConversationActive = false
         mainHandler.removeCallbacks(wakeSurpriseToListeningRunnable)
-        if (::conversationHudLayout.isInitialized) {
-            conversationHudLayout.visibility = View.GONE
-        }
-        if (::wakeBanner.isInitialized) {
-            wakeBanner.visibility = View.GONE
-        }
-        if (::userSpeechView.isInitialized) {
-            userSpeechView.visibility = View.GONE
-        }
-        if (::replyCardView.isInitialized) {
-            replyCardView.visibility = View.GONE
+        mainHandler.removeCallbacks(resetWakeStateRunnable)
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.dismiss()
         }
         if (::listeningOverlayContainer.isInitialized) {
             listeningOverlayContainer.visibility = View.GONE
