@@ -80,10 +80,11 @@ class BridgeWebSocketClient(
                     Socket()
                 }
                 activeSocket = socket
-                socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+                val s = socket ?: throw IOException("Failed to create socket")
+                s.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
 
-                val input = BufferedInputStream(socket.getInputStream())
-                val output = BufferedOutputStream(socket.getOutputStream())
+                val input = BufferedInputStream(s.getInputStream())
+                val output = BufferedOutputStream(s.getOutputStream())
 
                 // RFC 6455 Handshake
                 val nonce = ByteArray(16)
@@ -115,7 +116,7 @@ class BridgeWebSocketClient(
                 listener.onOpen()
 
                 // Read WebSocket frames
-                while (isRunning && !socket.isClosed) {
+                while (isRunning && !s.isClosed) {
                     val b0 = input.read()
                     if (b0 == -1) break
                     val b1 = input.read()
