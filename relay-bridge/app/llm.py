@@ -118,7 +118,12 @@ def format_board_summary(storage: BoardStorage) -> str:
             if isinstance(items, list):
                 lines.append("内容列表:")
                 for idx, item in enumerate(items, 1):
-                    lines.append(f"  {idx}. {item}")
+                    if isinstance(item, dict):
+                        item_text = item.get("text") or item.get("title") or item.get("content") or str(item)
+                        status_str = " (已完成)" if (item.get("completed") or item.get("done") or item.get("checked")) else ""
+                        lines.append(f"  {idx}. {item_text}{status_str}")
+                    else:
+                        lines.append(f"  {idx}. {item}")
             for k, v in data.items():
                 if k not in ("title", "date", "items"):
                     lines.append(f"{k}: {v}")

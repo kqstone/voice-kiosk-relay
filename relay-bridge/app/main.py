@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse
@@ -8,7 +9,7 @@ from app.auth import (
     verify_device_token,
     verify_push_token,
 )
-from app.dashboard import render_dashboard
+from app.dashboard import parse_board_to_components, render_dashboard
 from app.llm import (
     BridgeLLMError,
     build_chat_system_prompt,
@@ -26,6 +27,17 @@ class PushBoardRequest(BaseModel):
     data: Any = None
     updated_at: str | None = None
     source: str = "muse"
+
+
+class ToggleItemRequest(BaseModel):
+    completed: bool | None = None
+
+
+class ToggleItemResponse(BaseModel):
+    ok: bool = True
+    board_id: str
+    item_id: str
+    completed: bool
 
 
 class ChatRequest(BaseModel):
@@ -280,6 +292,102 @@ def get_board(board_id: str) -> dict[str, Any]:
 @app.get("/api/v1/boards", dependencies=[Depends(verify_device_or_push_token)])
 def list_boards() -> list[str]:
     return board_storage.list_boards()
+
+
+@app.post(
+    "/api/v1/boards/{board_id}/items/{item_id}/toggle",
+    response_model=ToggleItemResponse,
+    dependencies=[Depends(verify_device_or_push_token)],
+)
+async def toggle_board_item(
+    board_id: str,
+    item_id: str,
+    payload: ToggleItemRequest = ToggleItemRequest(),
+) -> ToggleItemResponse:
+    board = board_storage.get_board(board_id)
+    if board is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Board '{board_id}' not found",
+        )
+
+    data = board.get("data")
+    target_completed = payload.completed
+
+    found = False
+    new_state = False
+
+    items_list: list[Any] | None = None
+    if isinstance(data, list):
+        items_list = data
+    elif isinstance(data, dict):
+        for candidate_key in ["tasks", "items", "checklist", "todo", "content", "list"]:
+            val = data.get(candidate_key)
+            if isinstance(val, list):
+                items_list = val
+                break
+
+    if items_list is not None:
+        for idx, it in enumerate(items_list):
+            is_match = False
+            if isinstance(it, dict):
+                dict_id = str(it.get("id") or "")
+                if dict_id and dict_id == item_id:
+                    is_match = True
+                elif item_id in (f"item_{idx}", str(idx)):
+                    is_match = True
+            elif isinstance(it, str):
+                if item_id in (f"item_{idx}", str(idx), it):
+                    is_match = True
+
+            if is_match:
+                found = True
+                if isinstance(it, dict):
+                    curr = bool(it.get("completed") or it.get("done") or it.get("checked"))
+                    new_state = not curr if target_completed is None else bool(target_completed)
+                    it["completed"] = new_state
+                    if "id" not in it:
+                        it["id"] = item_id
+                else:
+                    curr = False
+                    new_state = not curr if target_completed is None else bool(target_completed)
+                    assigned_id = item_id if (item_id.startswith("item_") or not item_id.isdigit()) else f"item_{idx}"
+                    items_list[idx] = {
+                        "id": assigned_id,
+                        "text": it,
+                        "completed": new_state,
+                    }
+                break
+
+    if not found:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Item '{item_id}' not found in board '{board_id}'",
+        )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    source = str(board.get("source", "muse"))
+    board_storage.save_board(
+        board_id=board_id,
+        data=data,
+        source=source,
+        timestamp=now_iso,
+    )
+
+    await manager.broadcast({
+        "type": "board_update",
+        "board_id": board_id,
+        "action": "item_toggle",
+        "item_id": item_id,
+        "completed": new_state,
+    })
+
+    return ToggleItemResponse(
+        ok=True,
+        board_id=board_id,
+        item_id=item_id,
+        completed=new_state,
+    )
 
 
 @app.post(

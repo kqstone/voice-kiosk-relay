@@ -2,6 +2,21 @@ import html
 import json
 from typing import Any
 
+PALETTE: list[str] = [
+    "#06B6D4",  # Cyan
+    "#8B5CF6",  # Purple
+    "#10B981",  # Emerald
+    "#F59E0B",  # Amber
+    "#EC4899",  # Pink
+    "#3B82F6",  # Blue
+]
+
+
+def _get_color_for_label(label: str, index: int) -> str:
+    if label:
+        return PALETTE[abs(hash(label)) % len(PALETTE)]
+    return PALETTE[index % len(PALETTE)]
+
 
 def _extract_board_title(board_id: str, data: Any) -> str:
     if isinstance(data, dict):
@@ -26,7 +41,7 @@ def _extract_board_items(data: Any) -> list[str]:
     if isinstance(data, list):
         return [str(x) for x in data]
     if isinstance(data, dict):
-        for key in ["items", "tasks", "homework", "list", "content"]:
+        for key in ["items", "tasks", "checklist", "todo", "content", "list"]:
             val = data.get(key)
             if isinstance(val, list):
                 res: list[str] = []
@@ -39,10 +54,9 @@ def _extract_board_items(data: Any) -> list[str]:
                 return res
             if isinstance(val, str):
                 return [val]
-        # If no standard list key, list string values or key-value pairs
         pairs: list[str] = []
         for k, v in data.items():
-            if k in ["title", "date", "source", "version"]:
+            if k in ["title", "date", "source", "version", "tag", "category", "subtitle", "description", "desc", "badge"]:
                 continue
             pairs.append(f"{k}: {v}")
         if pairs:
@@ -52,63 +66,291 @@ def _extract_board_items(data: Any) -> list[str]:
     return []
 
 
+def parse_board_to_components(board_id: str, raw_board: Any) -> list[dict[str, Any]]:
+    """Generic board component parser.
+
+    Produces Title, Checklist, List, and KeyValue components.
+    Zero domain names, subject names, person names, or board IDs hardcoded.
+    Checklist items do NOT include estimated-time or meta fields.
+    """
+    components: list[dict[str, Any]] = []
+
+    if isinstance(raw_board, dict) and ("data" in raw_board or "board_id" in raw_board):
+        b_id = str(raw_board.get("board_id") or board_id)
+        data = raw_board.get("data", raw_board)
+    else:
+        b_id = board_id
+        data = raw_board
+
+    title = ""
+    tag = ""
+    subtitle = ""
+    explicit_badge = ""
+
+    if isinstance(data, dict):
+        title = str(data.get("title") or data.get("name") or b_id)
+        tag = str(data.get("tag") or data.get("category") or data.get("group") or "")
+        subtitle = str(data.get("subtitle") or data.get("description") or data.get("desc") or "")
+        explicit_badge = str(data.get("badge") or "")
+    else:
+        title = b_id
+
+    # If data explicitly defines structured components, return them directly
+    if isinstance(data, dict) and isinstance(data.get("components"), list):
+        return data["components"]
+
+    raw_items: list[Any] | None = None
+    list_key = ""
+    if isinstance(data, dict):
+        for candidate_key in ["tasks", "items", "checklist", "todo", "content", "list"]:
+            val = data.get(candidate_key)
+            if isinstance(val, list):
+                raw_items = val
+                list_key = candidate_key
+                break
+    elif isinstance(data, list):
+        raw_items = data
+
+    if raw_items is not None:
+        explicit_type = data.get("type") if isinstance(data, dict) else None
+        is_explicit_list = explicit_type == "list" or (list_key == "list" and not any(
+            isinstance(it, dict) and any(k in it for k in ["completed", "done", "checked"])
+            for it in raw_items
+        ))
+
+        if is_explicit_list:
+            list_items: list[dict[str, Any]] = []
+            for it in raw_items:
+                if isinstance(it, dict):
+                    t = str(it.get("text") or it.get("title") or it.get("content") or json.dumps(it, ensure_ascii=False))
+                else:
+                    t = str(it)
+                list_items.append({"text": t})
+
+            badge = explicit_badge or (f"{len(list_items)} 项" if list_items else "")
+            components.append({
+                "type": "title",
+                "title": title,
+                "tag": tag,
+                "subtitle": subtitle,
+                "badge": badge,
+            })
+            components.append({
+                "type": "list",
+                "items": list_items,
+            })
+        else:
+            checklist_items: list[dict[str, Any]] = []
+            for idx, item in enumerate(raw_items):
+                if isinstance(item, dict):
+                    item_id = str(item.get("id") or f"item_{idx}")
+                    label = str(item.get("label") or item.get("subject") or item.get("tag") or item.get("category") or "")
+                    text = str(item.get("text") or item.get("title") or item.get("content") or item.get("name") or "")
+                    is_done = bool(item.get("completed") or item.get("done") or item.get("checked"))
+                    color = str(item.get("color") or item.get("color_hint") or _get_color_for_label(label, idx))
+                else:
+                    item_id = f"item_{idx}"
+                    label = ""
+                    text = str(item)
+                    is_done = False
+                    color = _get_color_for_label("", idx)
+
+                checklist_items.append({
+                    "id": item_id,
+                    "label": label,
+                    "text": text,
+                    "completed": is_done,
+                    "color_hint": color,
+                })
+
+            completed_count = sum(1 for it in checklist_items if it["completed"])
+            total_count = len(checklist_items)
+            badge = explicit_badge or (f"{completed_count} / {total_count} 完成" if total_count > 0 else "")
+
+            components.append({
+                "type": "title",
+                "title": title,
+                "tag": tag,
+                "subtitle": subtitle,
+                "badge": badge,
+            })
+            components.append({
+                "type": "checklist",
+                "items": checklist_items,
+            })
+    elif isinstance(data, dict):
+        pairs: list[dict[str, str]] = []
+        ignored_keys = {
+            "title", "name", "tag", "category", "group", "subtitle",
+            "description", "desc", "badge", "date", "source", "updated_at",
+            "timestamp", "version", "type"
+        }
+        for k, v in data.items():
+            if k not in ignored_keys:
+                pairs.append({"key": str(k), "value": str(v)})
+
+        badge = explicit_badge or (f"{len(pairs)} 项" if pairs else "")
+        components.append({
+            "type": "title",
+            "title": title,
+            "tag": tag,
+            "subtitle": subtitle,
+            "badge": badge,
+        })
+        if pairs:
+            components.append({
+                "type": "key_value",
+                "pairs": pairs,
+            })
+    else:
+        components.append({
+            "type": "title",
+            "title": title,
+            "tag": tag,
+            "subtitle": subtitle,
+            "badge": explicit_badge,
+        })
+        if data:
+            components.append({
+                "type": "list",
+                "items": [{"text": str(data)}],
+            })
+
+    return components
+
+
 def render_dashboard(boards: list[dict[str, Any]]) -> str:
-    rendered_cards: list[str] = []
+    """Renders OLED true dark HTML dashboard.
+
+    - Pure black background (#000000)
+    - Dark cards (#141416) with subtle borders (#27272A)
+    - Strikethrough text and purple checked circles for completed items
+    - Each board as its own distinct section
+    """
+    rendered_sections: list[str] = []
 
     if not boards:
-        rendered_cards.append(
+        rendered_sections.append(
             '<div class="empty-state" id="empty-state">暂无看板数据</div>'
         )
     else:
         for b in boards:
             b_id = html.escape(str(b.get("board_id", "")))
-            data = b.get("data", {})
-            title = html.escape(_extract_board_title(b_id, data))
             date_str = html.escape(_extract_board_date(b))
             source_str = html.escape(str(b.get("source", "muse")))
-            items = _extract_board_items(data)
 
-            items_html_parts: list[str] = []
-            if items:
-                items_html_parts.append('<ul class="item-list">')
-                for item in items:
-                    escaped_item = html.escape(item)
-                    items_html_parts.append(
-                        '<li class="item">'
-                        + '<span class="item-bullet"></span>'
-                        + '<span class="item-text">'
-                        + escaped_item
-                        + '</span>'
-                        + '</li>'
-                    )
-                items_html_parts.append('</ul>')
-            else:
-                items_html_parts.append('<p class="item-empty">（暂无明细内容）</p>')
+            components = parse_board_to_components(b_id, b)
 
-            items_html = "".join(items_html_parts)
+            title_comp: dict[str, Any] = {}
+            body_parts: list[str] = []
 
-            card_html = (
-                '<div class="board-card" id="card-' + b_id + '" data-board-id="' + b_id + '">'
-                + '<div class="card-header">'
-                + '<div class="card-title-group">'
-                + '<h2 class="card-title">' + title + '</h2>'
-                + '<span class="card-id-badge">' + b_id + '</span>'
+            for comp in components:
+                c_type = comp.get("type")
+                if c_type == "title":
+                    title_comp = comp
+                elif c_type == "checklist":
+                    items = comp.get("items", [])
+                    if items:
+                        body_parts.append('<div class="task-grid">')
+                        for it in items:
+                            it_id = html.escape(str(it.get("id", "")))
+                            it_label = html.escape(str(it.get("label", "")))
+                            it_text = html.escape(str(it.get("text", "")))
+                            it_done = bool(it.get("completed", False))
+                            it_color = html.escape(str(it.get("color_hint", "#8B5CF6")))
+
+                            completed_class = " completed" if it_done else ""
+                            checked_class = " checked" if it_done else ""
+                            check_icon = "✓" if it_done else ""
+
+                            label_html = ""
+                            if it_label:
+                                label_html = '<span class="task-label">' + it_label + '</span>'
+
+                            body_parts.append(
+                                '<div class="task-card' + completed_class + '" data-board-id="' + b_id + '" data-item-id="' + it_id + '" onclick="toggleItem(\'' + b_id + '\', \'' + it_id + '\')">'
+                                + '<div class="task-left">'
+                                + '<span class="task-dot" style="background-color: ' + it_color + ';"></span>'
+                                + label_html
+                                + '<span class="task-text">' + it_text + '</span>'
+                                + '</div>'
+                                + '<div class="task-checkbox' + checked_class + '">' + check_icon + '</div>'
+                                + '</div>'
+                            )
+                        body_parts.append('</div>')
+                    else:
+                        body_parts.append('<p class="item-empty">（暂无清单项）</p>')
+
+                elif c_type == "list":
+                    items = comp.get("items", [])
+                    if items:
+                        body_parts.append('<ul class="generic-list">')
+                        for it in items:
+                            txt = html.escape(str(it.get("text", "")))
+                            body_parts.append(
+                                '<li class="generic-list-item">'
+                                + '<span class="list-bullet"></span>'
+                                + '<span class="list-text">' + txt + '</span>'
+                                + '</li>'
+                            )
+                        body_parts.append('</ul>')
+                    else:
+                        body_parts.append('<p class="item-empty">（暂无列表内容）</p>')
+
+                elif c_type == "key_value":
+                    pairs = comp.get("pairs", [])
+                    if pairs:
+                        body_parts.append('<div class="kv-grid">')
+                        for p in pairs:
+                            k = html.escape(str(p.get("key", "")))
+                            v = html.escape(str(p.get("value", "")))
+                            body_parts.append(
+                                '<div class="kv-row">'
+                                + '<span class="kv-key">' + k + '</span>'
+                                + '<span class="kv-value">' + v + '</span>'
+                                + '</div>'
+                            )
+                        body_parts.append('</div>')
+
+            comp_title = html.escape(str(title_comp.get("title") or b_id))
+            comp_tag = html.escape(str(title_comp.get("tag") or ""))
+            comp_subtitle = html.escape(str(title_comp.get("subtitle") or ""))
+            comp_badge = html.escape(str(title_comp.get("badge") or ""))
+
+            tag_html = ('<span class="board-tag">' + comp_tag + '</span>') if comp_tag else ""
+            subtitle_html = ('<p class="board-subtitle">' + comp_subtitle + '</p>') if comp_subtitle else ""
+            badge_html = ('<span class="board-badge">' + comp_badge + '</span>') if comp_badge else ""
+            date_html = ('<span class="meta-date">' + date_str + '</span>') if date_str else ""
+
+            section_html = (
+                '<section class="board-section" id="board-' + b_id + '" data-board-id="' + b_id + '">'
+                + '<div class="board-header">'
+                + '<div class="header-left">'
+                + '<div class="title-row">'
+                + '<span class="indicator-dot"></span>'
+                + '<h2 class="board-title">' + comp_title + '</h2>'
+                + tag_html
                 + '</div>'
-                + '<div class="card-meta">'
-                + (('<span class="meta-date">' + date_str + '</span>') if date_str else "")
+                + subtitle_html
+                + '<div class="board-meta">'
+                + '<span class="meta-id">' + b_id + '</span>'
+                + date_html
                 + '<span class="meta-source">来源: ' + source_str + '</span>'
                 + '</div>'
                 + '</div>'
-                + '<div class="card-body">'
-                + items_html
+                + '<div class="header-right">'
+                + badge_html
                 + '</div>'
                 + '</div>'
+                + '<div class="board-body">'
+                + "".join(body_parts)
+                + '</div>'
+                + '</section>'
             )
-            rendered_cards.append(card_html)
+            rendered_sections.append(section_html)
 
-    cards_block = "\n".join(rendered_cards)
+    sections_block = "\n".join(rendered_sections)
 
-    # HTML page construction (strictly without backticks)
     html_doc = """<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -117,16 +359,20 @@ def render_dashboard(boards: list[dict[str, Any]]) -> str:
   <title>Voice Kiosk 看板</title>
   <style>
     :root {
-      --bg-color: #f8fafc;
-      --card-bg: #ffffff;
-      --text-main: #0f172a;
+      --bg-color: #000000;
+      --card-bg: #141416;
+      --card-inner: #18181b;
+      --border-color: #27272a;
+      --border-light: #3f3f46;
+      --text-main: #f8fafc;
+      --text-secondary: #94a3b8;
       --text-muted: #64748b;
-      --primary: #2563eb;
-      --primary-light: #eff6ff;
-      --success: #16a34a;
-      --border-color: #e2e8f0;
+      --accent-purple: #8b5cf6;
+      --accent-purple-glow: rgba(139, 92, 246, 0.6);
+      --badge-bg: #2e1065;
+      --badge-text: #e0e7ff;
       --card-radius: 16px;
-      --card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+      --item-radius: 12px;
     }
     * {
       box-sizing: border-box;
@@ -138,7 +384,7 @@ def render_dashboard(boards: list[dict[str, Any]]) -> str:
       background-color: var(--bg-color);
       color: var(--text-main);
       line-height: 1.5;
-      padding: 16px;
+      padding: 20px 16px;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
@@ -146,227 +392,414 @@ def render_dashboard(boards: list[dict[str, Any]]) -> str:
     }
     .container {
       width: 100%;
-      max-width: 640px;
+      max-width: 860px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 20px;
     }
-    header {
+    header.kiosk-nav {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 12px 16px;
+      padding: 14px 20px;
       background: var(--card-bg);
       border-radius: var(--card-radius);
-      box-shadow: var(--card-shadow);
       border: 1px solid var(--border-color);
     }
-    .header-title {
-      font-size: 20px;
-      font-weight: 700;
-      color: var(--text-main);
+    .nav-title-group {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
     }
-    .header-badges {
+    .nav-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent-purple);
+      box-shadow: 0 0 10px var(--accent-purple-glow);
+    }
+    .nav-title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--text-main);
+    }
+    .nav-badges {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
     }
     .badge {
       font-size: 12px;
-      padding: 4px 8px;
+      padding: 4px 10px;
       border-radius: 9999px;
       font-weight: 500;
     }
     .badge-ws {
-      background: #f1f5f9;
-      color: var(--text-muted);
+      background: #18181b;
+      color: var(--text-secondary);
+      border: 1px solid var(--border-color);
     }
     .badge-ws.connected {
-      background: #dcfce7;
-      color: var(--success);
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border-color: rgba(16, 185, 129, 0.4);
     }
     .badge-ws.error {
-      background: #fee2e2;
-      color: #dc2626;
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border-color: rgba(239, 68, 68, 0.4);
     }
-    .board-card {
+    .controls-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 4px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    .controls-bar a, .controls-bar button {
+      color: var(--accent-purple);
+      text-decoration: none;
+      background: none;
+      border: none;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .token-modal {
+      display: none;
+      padding: 16px;
       background: var(--card-bg);
       border-radius: var(--card-radius);
-      box-shadow: var(--card-shadow);
       border: 1px solid var(--border-color);
-      overflow: hidden;
     }
-    .card-header {
-      padding: 16px 20px;
-      border-bottom: 1px solid var(--border-color);
+    .token-modal input {
+      width: 100%;
+      padding: 10px 12px;
+      font-size: 14px;
+      background: var(--card-inner);
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      margin-top: 8px;
+      margin-bottom: 12px;
+    }
+    .token-modal input:focus {
+      outline: none;
+      border-color: var(--accent-purple);
+    }
+    .token-modal button {
+      padding: 8px 18px;
+      background: var(--accent-purple);
+      color: #ffffff;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .boards-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .board-section {
+      background: var(--card-bg);
+      border-radius: var(--card-radius);
+      border: 1px solid var(--border-color);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .board-header {
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
       gap: 12px;
-      background: linear-gradient(to right, #ffffff, var(--primary-light));
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-color);
     }
-    .card-title-group {
+    .header-left {
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 6px;
+      flex: 1;
     }
-    .card-title {
-      font-size: 18px;
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .indicator-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-purple);
+      box-shadow: 0 0 8px var(--accent-purple-glow);
+      flex-shrink: 0;
+    }
+    .board-title {
+      font-size: 20px;
       font-weight: 700;
       color: var(--text-main);
       word-break: break-word;
     }
-    .card-id-badge {
-      font-size: 11px;
+    .board-tag {
+      font-size: 12px;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      background: rgba(139, 92, 246, 0.15);
+      color: #c4b5fd;
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      font-weight: 500;
+    }
+    .board-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+    }
+    .board-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
       color: var(--text-muted);
-      background: rgba(0, 0, 0, 0.04);
+      flex-wrap: wrap;
+    }
+    .meta-id {
+      font-family: monospace;
+      background: #18181b;
       padding: 2px 6px;
       border-radius: 4px;
-      align-self: flex-start;
-      font-family: monospace;
+      border: 1px solid var(--border-color);
     }
-    .card-meta {
+    .meta-date {
+      color: var(--accent-purple);
+      font-weight: 500;
+    }
+    .header-right {
       display: flex;
       flex-direction: column;
       align-items: flex-end;
-      gap: 4px;
-      font-size: 12px;
-      color: var(--text-muted);
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .board-badge {
+      font-size: 13px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      background: var(--badge-bg);
+      color: var(--badge-text);
+      border: 1px solid rgba(139, 92, 246, 0.4);
       white-space: nowrap;
     }
-    .meta-date {
-      font-weight: 600;
-      color: var(--primary);
-    }
-    .card-body {
-      padding: 20px;
-    }
-    .item-list {
-      list-style: none;
+    .board-body {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 10px;
     }
-    .item {
+    .task-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    @media (min-width: 680px) {
+      .task-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+    .task-card {
+      background: var(--card-inner);
+      border-radius: var(--item-radius);
+      border: 1px solid var(--border-color);
+      padding: 14px 16px;
       display: flex;
-      align-items: flex-start;
+      justify-content: space-between;
+      align-items: center;
       gap: 12px;
-      font-size: 16px;
-      color: var(--text-main);
-      line-height: 1.6;
-      padding: 8px 12px;
-      background: #f8fafc;
-      border-radius: 8px;
-      border-left: 4px solid var(--primary);
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease;
+      user-select: none;
     }
-    .item-bullet {
+    .task-card:hover {
+      border-color: var(--border-light);
+    }
+    .task-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+    }
+    .task-dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: var(--primary);
+      flex-shrink: 0;
+    }
+    .task-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+    .task-text {
+      font-size: 15px;
+      color: var(--text-main);
+      word-break: break-word;
+      line-height: 1.4;
+      flex: 1;
+    }
+    .task-checkbox {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      border: 2px solid #475569;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 13px;
+      font-weight: 700;
+      color: transparent;
+      transition: all 0.2s ease;
+    }
+    .task-card.completed .task-text {
+      color: var(--text-muted);
+      text-decoration: line-through;
+    }
+    .task-card.completed .task-dot {
+      opacity: 0.4;
+    }
+    .task-card.completed .task-label {
+      opacity: 0.4;
+    }
+    .task-checkbox.checked {
+      background: var(--accent-purple);
+      border-color: var(--accent-purple);
+      color: #ffffff;
+    }
+    .generic-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .generic-list-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--card-inner);
+      border-radius: var(--item-radius);
+      border: 1px solid var(--border-color);
+      font-size: 15px;
+      color: var(--text-main);
+    }
+    .list-bullet {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-purple);
       margin-top: 8px;
       flex-shrink: 0;
     }
-    .item-text {
+    .list-text {
       flex: 1;
       word-break: break-word;
+    }
+    .kv-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .kv-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 14px;
+      background: var(--card-inner);
+      border-radius: var(--item-radius);
+      border: 1px solid var(--border-color);
+      font-size: 14px;
+    }
+    .kv-key {
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    .kv-value {
+      color: var(--text-main);
+      font-weight: 600;
     }
     .item-empty {
       color: var(--text-muted);
       font-style: italic;
       text-align: center;
-      padding: 12px;
+      padding: 14px;
+      font-size: 14px;
     }
     .empty-state {
       background: var(--card-bg);
       border-radius: var(--card-radius);
-      padding: 40px 20px;
+      padding: 48px 24px;
       text-align: center;
       color: var(--text-muted);
       border: 1px dashed var(--border-color);
       font-size: 16px;
     }
-    .controls {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 16px;
-      font-size: 12px;
-      color: var(--text-muted);
-    }
-    .controls a, .controls button {
-      color: var(--primary);
-      text-decoration: none;
-      background: none;
-      border: none;
-      font-size: 12px;
-      cursor: pointer;
-    }
-    .token-modal {
-      display: none;
-      padding: 12px;
-      background: var(--card-bg);
-      border-radius: 12px;
-      border: 1px solid var(--border-color);
-      margin-top: 8px;
-    }
-    .token-modal input {
-      width: 100%;
-      padding: 8px;
-      font-size: 14px;
-      border: 1px solid var(--border-color);
-      border-radius: 6px;
-      margin-top: 6px;
-      margin-bottom: 8px;
-    }
-    .token-modal button {
-      padding: 6px 14px;
-      background: var(--primary);
-      color: white;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-    }
   </style>
 </head>
 <body>
   <div class="container">
-    <header>
-      <div class="header-title">
-        <span>📋</span>
-        <span>Voice Kiosk 看板</span>
+    <header class="kiosk-nav">
+      <div class="nav-title-group">
+        <span class="nav-dot"></span>
+        <span class="nav-title">Voice Kiosk 看板</span>
       </div>
-      <div class="header-badges">
+      <div class="nav-badges">
         <span class="badge badge-ws" id="ws-badge">WS: 连接中</span>
       </div>
     </header>
 
-    <div class="controls">
+    <div class="controls-bar">
       <span id="update-status">就绪</span>
       <div>
         <button type="button" onclick="toggleTokenModal()">设置 Token</button>
-        <span style="margin: 0 4px;">|</span>
+        <span style="margin: 0 6px; opacity: 0.4;">|</span>
         <button type="button" onclick="manualRefresh()">刷新</button>
       </div>
     </div>
 
     <div class="token-modal" id="token-modal">
-      <label for="input-token" style="font-size: 13px; font-weight: 600;">访问 Token (DEVICE_TOKEN 或 PUSH_TOKEN):</label>
+      <label for="input-token" style="font-size: 13px; font-weight: 600; color: var(--text-main);">访问 Token (DEVICE_TOKEN 或 PUSH_TOKEN):</label>
       <input type="password" id="input-token" placeholder="输入 token 后点击保存">
       <div style="display: flex; justify-content: flex-end; gap: 8px;">
         <button type="button" onclick="saveToken()">保存并刷新</button>
       </div>
     </div>
 
-    <main id="boards-container">
-""" + cards_block + """
+    <main class="boards-wrapper" id="boards-container">
+""" + sections_block + """
     </main>
   </div>
 
   <script>
+    var PALETTE = ['#06B6D4', '#8B5CF6', '#10B981', '#F59E0B', '#EC4899', '#3B82F6'];
+
+    function getColorForLabel(label, index) {
+      if (label && label.length > 0) {
+        var hash = 0;
+        for (var i = 0; i < label.length; i++) {
+          hash = ((hash << 5) - hash) + label.charCodeAt(i);
+          hash |= 0;
+        }
+        return PALETTE[Math.abs(hash) % PALETTE.length];
+      }
+      return PALETTE[index % PALETTE.length];
+    }
+
     function getStoredToken() {
       var urlParams = new URLSearchParams(window.location.search);
       var qToken = urlParams.get('token');
@@ -416,76 +849,236 @@ def render_dashboard(boards: list[dict[str, Any]]) -> str:
         .replace(/'/g, '&#039;');
     }
 
-    function renderBoardCard(board) {
+    function toggleItem(boardId, itemId) {
+      var token = getStoredToken();
+      var headers = {};
+      if (token) {
+        headers['Authorization'] = 'Bearer ' + token;
+      }
+      fetch('/api/v1/boards/' + encodeURIComponent(boardId) + '/items/' + encodeURIComponent(itemId) + '/toggle', {
+        method: 'POST',
+        headers: headers
+      }).then(function(res) {
+        if (res.ok) {
+          manualRefresh();
+        }
+      }).catch(function(err) {});
+    }
+
+    function parseBoardToComponentsJs(boardId, data) {
+      var components = [];
+      var bId = String(boardId || '');
+      var title = bId;
+      var tag = '';
+      var subtitle = '';
+      var explicitBadge = '';
+
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        title = String(data.title || data.name || bId);
+        tag = String(data.tag || data.category || data.group || '');
+        subtitle = String(data.subtitle || data.description || data.desc || '');
+        explicitBadge = String(data.badge || '');
+        if (Array.isArray(data.components)) {
+          return data.components;
+        }
+      }
+
+      var rawItems = null;
+      var listKey = '';
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        var keys = ['tasks', 'items', 'checklist', 'todo', 'content', 'list'];
+        for (var i = 0; i < keys.length; i++) {
+          var val = data[keys[i]];
+          if (Array.isArray(val)) {
+            rawItems = val;
+            listKey = keys[i];
+            break;
+          }
+        }
+      } else if (Array.isArray(data)) {
+        rawItems = data;
+      }
+
+      if (rawItems !== null) {
+        var explicitType = (data && typeof data === 'object') ? data.type : null;
+        var hasDoneKey = false;
+        for (var d = 0; d < rawItems.length; d++) {
+          if (rawItems[d] && typeof rawItems[d] === 'object') {
+            if ('completed' in rawItems[d] || 'done' in rawItems[d] || 'checked' in rawItems[d]) {
+              hasDoneKey = true;
+              break;
+            }
+          }
+        }
+        var isExplicitList = explicitType === 'list' || (listKey === 'list' && !hasDoneKey);
+
+        if (isExplicitList) {
+          var listItems = [];
+          for (var li = 0; li < rawItems.length; li++) {
+            var lItem = rawItems[li];
+            var lTxt = (lItem && typeof lItem === 'object') ? (lItem.text || lItem.title || lItem.content || JSON.stringify(lItem)) : String(lItem);
+            listItems.push({ text: lTxt });
+          }
+          var badgeText = explicitBadge || (listItems.length > 0 ? (listItems.length + ' 项') : '');
+          components.push({ type: 'title', title: title, tag: tag, subtitle: subtitle, badge: badgeText });
+          components.push({ type: 'list', items: listItems });
+        } else {
+          var checklistItems = [];
+          for (var ci = 0; ci < rawItems.length; ci++) {
+            var cItem = rawItems[ci];
+            if (cItem && typeof cItem === 'object') {
+              var cId = String(cItem.id || ('item_' + ci));
+              var cLabel = String(cItem.label || cItem.subject || cItem.tag || cItem.category || '');
+              var cText = String(cItem.text || cItem.title || cItem.content || cItem.name || '');
+              var cDone = Boolean(cItem.completed || cItem.done || cItem.checked);
+              var cColor = String(cItem.color || cItem.color_hint || getColorForLabel(cLabel, ci));
+              checklistItems.push({ id: cId, label: cLabel, text: cText, completed: cDone, color_hint: cColor });
+            } else {
+              checklistItems.push({
+                id: 'item_' + ci,
+                label: '',
+                text: String(cItem),
+                completed: false,
+                color_hint: getColorForLabel('', ci)
+              });
+            }
+          }
+          var doneCount = 0;
+          for (var dc = 0; dc < checklistItems.length; dc++) {
+            if (checklistItems[dc].completed) doneCount++;
+          }
+          var chkBadge = explicitBadge || (checklistItems.length > 0 ? (doneCount + ' / ' + checklistItems.length + ' 完成') : '');
+          components.push({ type: 'title', title: title, tag: tag, subtitle: subtitle, badge: chkBadge });
+          components.push({ type: 'checklist', items: checklistItems });
+        }
+      } else if (data && typeof data === 'object' && !Array.isArray(data)) {
+        var pairs = [];
+        var ignored = ['title', 'name', 'tag', 'category', 'group', 'subtitle', 'description', 'desc', 'badge', 'date', 'source', 'updated_at', 'timestamp', 'version', 'type'];
+        for (var k in data) {
+          if (ignored.indexOf(k) === -1) {
+            pairs.push({ key: String(k), value: String(data[k]) });
+          }
+        }
+        var kvBadge = explicitBadge || (pairs.length > 0 ? (pairs.length + ' 项') : '');
+        components.push({ type: 'title', title: title, tag: tag, subtitle: subtitle, badge: kvBadge });
+        if (pairs.length > 0) {
+          components.push({ type: 'key_value', pairs: pairs });
+        }
+      } else {
+        components.push({ type: 'title', title: title, tag: tag, subtitle: subtitle, badge: explicitBadge });
+        if (data) {
+          components.push({ type: 'list', items: [{ text: String(data) }] });
+        }
+      }
+      return components;
+    }
+
+    function renderBoardSection(board) {
       var bId = escapeHtml(board.board_id || '');
       var data = board.data || {};
-      var title = escapeHtml(data.title || data.name || bId);
       var dateStr = escapeHtml(data.date || (board.updated_at ? board.updated_at.slice(0, 10) : ''));
       var sourceStr = escapeHtml(board.source || 'muse');
 
-      var items = [];
-      if (Array.isArray(data)) {
-        items = data;
-      } else if (typeof data === 'object') {
-        var itemKeys = ['items', 'tasks', 'homework', 'list', 'content'];
-        for (var i = 0; i < itemKeys.length; i++) {
-          var val = data[itemKeys[i]];
-          if (Array.isArray(val)) {
-            for (var j = 0; j < val.length; j++) {
-              var it = val[j];
-              if (it && typeof it === 'object') {
-                items.push(it.text || it.title || it.content || JSON.stringify(it));
-              } else {
-                items.push(String(it));
-              }
+      var components = parseBoardToComponentsJs(bId, data);
+      var titleComp = {};
+      var bodyHtml = '';
+
+      for (var i = 0; i < components.length; i++) {
+        var comp = components[i];
+        if (comp.type === 'title') {
+          titleComp = comp;
+        } else if (comp.type === 'checklist') {
+          var items = comp.items || [];
+          if (items.length > 0) {
+            bodyHtml += '<div class="task-grid">';
+            for (var j = 0; j < items.length; j++) {
+              var it = items[j];
+              var itId = escapeHtml(it.id || '');
+              var itLabel = escapeHtml(it.label || '');
+              var itText = escapeHtml(it.text || '');
+              var itDone = Boolean(it.completed);
+              var itColor = escapeHtml(it.color_hint || '#8B5CF6');
+
+              var compClass = itDone ? ' completed' : '';
+              var chkClass = itDone ? ' checked' : '';
+              var chkIcon = itDone ? '✓' : '';
+              var lblHtml = itLabel ? ('<span class="task-label">' + itLabel + '</span>') : '';
+
+              bodyHtml += '<div class="task-card' + compClass + '" data-board-id="' + bId + '" data-item-id="' + itId + '" onclick="toggleItem(\'' + bId + '\', \'' + itId + '\')">'
+                + '<div class="task-left">'
+                + '<span class="task-dot" style="background-color: ' + itColor + ';"></span>'
+                + lblHtml
+                + '<span class="task-text">' + itText + '</span>'
+                + '</div>'
+                + '<div class="task-checkbox' + chkClass + '">' + chkIcon + '</div>'
+                + '</div>';
             }
-            break;
-          } else if (typeof val === 'string') {
-            items.push(val);
-            break;
+            bodyHtml += '</div>';
+          } else {
+            bodyHtml += '<p class="item-empty">（暂无清单项）</p>';
+          }
+        } else if (comp.type === 'list') {
+          var lItems = comp.items || [];
+          if (lItems.length > 0) {
+            bodyHtml += '<ul class="generic-list">';
+            for (var k = 0; k < lItems.length; k++) {
+              bodyHtml += '<li class="generic-list-item">'
+                + '<span class="list-bullet"></span>'
+                + '<span class="list-text">' + escapeHtml(lItems[k].text || '') + '</span>'
+                + '</li>';
+            }
+            bodyHtml += '</ul>';
+          } else {
+            bodyHtml += '<p class="item-empty">（暂无列表内容）</p>';
+          }
+        } else if (comp.type === 'key_value') {
+          var pairs = comp.pairs || [];
+          if (pairs.length > 0) {
+            bodyHtml += '<div class="kv-grid">';
+            for (var m = 0; m < pairs.length; m++) {
+              bodyHtml += '<div class="kv-row">'
+                + '<span class="kv-key">' + escapeHtml(pairs[m].key || '') + '</span>'
+                + '<span class="kv-value">' + escapeHtml(pairs[m].value || '') + '</span>'
+                + '</div>';
+            }
+            bodyHtml += '</div>';
           }
         }
-        if (items.length === 0) {
-          for (var k in data) {
-            if (['title', 'date', 'source', 'version'].indexOf(k) === -1) {
-              items.push(k + ': ' + data[k]);
-            }
-          }
-        }
-      } else if (typeof data === 'string') {
-        items.push(data);
       }
 
-      var itemsHtml = '';
-      if (items.length > 0) {
-        itemsHtml += '<ul class="item-list">';
-        for (var idx = 0; idx < items.length; idx++) {
-          itemsHtml += '<li class="item">'
-            + '<span class="item-bullet"></span>'
-            + '<span class="item-text">' + escapeHtml(items[idx]) + '</span>'
-            + '</li>';
-        }
-        itemsHtml += '</ul>';
-      } else {
-        itemsHtml = '<p class="item-empty">（暂无明细内容）</p>';
-      }
+      var compTitle = escapeHtml(titleComp.title || bId);
+      var compTag = escapeHtml(titleComp.tag || '');
+      var compSubtitle = escapeHtml(titleComp.subtitle || '');
+      var compBadge = escapeHtml(titleComp.badge || '');
 
-      var dateTag = dateStr ? '<span class="meta-date">' + dateStr + '</span>' : '';
-      return '<div class="board-card" id="card-' + bId + '" data-board-id="' + bId + '">'
-        + '<div class="card-header">'
-        + '<div class="card-title-group">'
-        + '<h2 class="card-title">' + title + '</h2>'
-        + '<span class="card-id-badge">' + bId + '</span>'
+      var tagHtml = compTag ? ('<span class="board-tag">' + compTag + '</span>') : '';
+      var subHtml = compSubtitle ? ('<p class="board-subtitle">' + compSubtitle + '</p>') : '';
+      var badgeHtml = compBadge ? ('<span class="board-badge">' + compBadge + '</span>') : '';
+      var dateHtml = dateStr ? ('<span class="meta-date">' + dateStr + '</span>') : '';
+
+      return '<section class="board-section" id="board-' + bId + '" data-board-id="' + bId + '">'
+        + '<div class="board-header">'
+        + '<div class="header-left">'
+        + '<div class="title-row">'
+        + '<span class="indicator-dot"></span>'
+        + '<h2 class="board-title">' + compTitle + '</h2>'
+        + tagHtml
         + '</div>'
-        + '<div class="card-meta">'
-        + dateTag
+        + subHtml
+        + '<div class="board-meta">'
+        + '<span class="meta-id">' + bId + '</span>'
+        + dateHtml
         + '<span class="meta-source">来源: ' + sourceStr + '</span>'
         + '</div>'
         + '</div>'
-        + '<div class="card-body">'
-        + itemsHtml
+        + '<div class="header-right">'
+        + badgeHtml
         + '</div>'
-        + '</div>';
+        + '</div>'
+        + '<div class="board-body">'
+        + bodyHtml
+        + '</div>'
+        + '</section>';
     }
 
     function fetchBoardsWithToken(token) {
@@ -532,7 +1125,7 @@ def render_dashboard(boards: list[dict[str, Any]]) -> str:
           } else {
             var cardsHtml = '';
             for (var i = 0; i < validBoards.length; i++) {
-              cardsHtml += renderBoardCard(validBoards[i]);
+              cardsHtml += renderBoardSection(validBoards[i]);
             }
             container.innerHTML = cardsHtml;
           }
@@ -542,9 +1135,7 @@ def render_dashboard(boards: list[dict[str, Any]]) -> str:
                         (now.getSeconds() < 10 ? '0' : '') + now.getSeconds();
           statusEl.textContent = '更新于 ' + timeStr;
         })
-        .catch(function(err) {
-          // Keep current rendered boards on network or auth errors
-        });
+        .catch(function(err) {});
     }
 
     function manualRefresh() {
@@ -552,7 +1143,6 @@ def render_dashboard(boards: list[dict[str, Any]]) -> str:
       fetchBoardsWithToken(token);
     }
 
-    // Connect to WebSocket /ws
     var ws = null;
     function connectWs() {
       var badge = document.getElementById('ws-badge');
