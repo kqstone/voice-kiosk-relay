@@ -1,5 +1,6 @@
 package com.voicekiosk.app.ondevice.route
 
+import com.voicekiosk.app.ondevice.tools.LocalPlatform
 import com.voicekiosk.app.ondevice.tools.LocalToolExecutor
 import com.voicekiosk.app.ondevice.tools.MediaAction
 import com.voicekiosk.app.ondevice.tools.PlaySearchResult
@@ -59,6 +60,19 @@ class LocalToolExecutorTest {
         val none = x.execute(d(Intents.MEDIA_PLAY, "query" to "稻香"))
         assertTrue("honest answer, no cloud fallback", none.handled && !none.fallbackToCloud)
         assertTrue(none.reply.contains("没有找到"))
+        p.playResult = PlaySearchResult.BACKGROUND_NOT_SUPPORTED
+        val unsupported = x.execute(d(Intents.MEDIA_PLAY, "query" to "七里香"))
+        assertTrue("honest answer, no cloud fallback", unsupported.handled && !unsupported.fallbackToCloud)
+        assertEquals("当前播放器不支持后台静默点歌，请在设置中切换为网易云音乐或系统音乐。", unsupported.reply)
+        val customPlatform = object : LocalPlatform by p {
+            override fun playFromSearch(query: String, artist: String?, song: String?): Pair<PlaySearchResult, String?> {
+                return PlaySearchResult.BACKGROUND_NOT_SUPPORTED to "YouTube"
+            }
+        }
+        val customX = LocalToolExecutor(customPlatform)
+        val namedUnsupported = customX.execute(d(Intents.MEDIA_PLAY, "query" to "七里香"))
+        assertTrue("honest answer with player name", namedUnsupported.handled && !namedUnsupported.fallbackToCloud)
+        assertEquals("【YouTube】不支持后台静默点歌，请在设置中切换为网易云音乐或系统音乐。", namedUnsupported.reply)
         p.mediaOk = false
         assertTrue(x.execute(d(Intents.MEDIA_CONTROL, "action" to "pause")).fallbackToCloud)
     }

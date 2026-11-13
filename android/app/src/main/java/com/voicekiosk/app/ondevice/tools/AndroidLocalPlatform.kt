@@ -1,7 +1,5 @@
 package com.voicekiosk.app.ondevice.tools
 
-import android.app.SearchManager
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -13,6 +11,8 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import android.view.KeyEvent
+import com.voicekiosk.app.media.BackgroundLaunchResult
+import com.voicekiosk.app.media.BackgroundMediaLauncher
 import java.time.ZoneId
 
 /**
@@ -22,9 +22,7 @@ import java.time.ZoneId
  *   so the system volume bar confirms the change.
  * - Media keys: [AudioManager.dispatchMediaKeyEvent] goes to the active media session
  *   (or the last one that played), so it controls whatever third-party player is in use.
- * - Play-from-search: [MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH] sent explicitly
- *   to the first player that handles it (no chooser on a kiosk). Only third-party
- *   players; whether a search actually plays is up to the player.
+ * - Play-from-search: background silent playback via [BackgroundMediaLauncher] without starting activity.
  * - Timers: in-app, on the main looper; [onTimerFired] announces them (the voice
  *   service speaks and shows them). They do not survive the service being killed.
  */
@@ -32,8 +30,20 @@ class AndroidLocalPlatform(
     private val context: Context,
     /** Package name of the player chosen in settings ("" = first one found). */
     private val preferredPlayer: () -> String = { "" },
+    private val backgroundLauncher: BackgroundMediaLauncher,
     private val onTimerFired: (label: String?, seconds: Int) -> Unit
 ) : LocalPlatform {
+
+    constructor(
+        context: Context,
+        preferredPlayer: () -> String = { "" },
+        onTimerFired: (label: String?, seconds: Int) -> Unit
+    ) : this(
+        context = context,
+        preferredPlayer = preferredPlayer,
+        backgroundLauncher = BackgroundMediaLauncher(context),
+        onTimerFired = onTimerFired
+    )
 
     private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val handler = Handler(Looper.getMainLooper())
@@ -78,35 +88,26 @@ class AndroidLocalPlatform(
     }
 
     override fun playFromSearch(query: String, artist: String?, song: String?): Pair<PlaySearchResult, String?> {
-        val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
-            putExtra(SearchManager.QUERY, query)
-            when {
-                song != null -> {
-                    putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/audio")
-                    putExtra(MediaStore.EXTRA_MEDIA_TITLE, song)
-                    if (artist != null) putExtra(MediaStore.EXTRA_MEDIA_ARTIST, artist)
-                }
-                artist != null -> {
-                    putExtra(MediaStore.EXTRA_MEDIA_FOCUS, MediaStore.Audio.Artists.ENTRY_CONTENT_TYPE)
-                    putExtra(MediaStore.EXTRA_MEDIA_ARTIST, artist)
-                }
-                else -> putExtra(MediaStore.EXTRA_MEDIA_FOCUS, "vnd.android.cursor.item/*")
-            }
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        return try {
-            val pm = context.packageManager
-            val candidates = pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
-                .filter { it.activityInfo.packageName != context.packageName }
-            val preferred = preferredPlayer()
-            val pick = candidates.firstOrNull { preferred.isNotEmpty() && it.activityInfo.packageName == preferred }
-                ?: candidates.firstOrNull() ?: return PlaySearchResult.NO_PLAYER to null
-            intent.component = ComponentName(pick.activityInfo.packageName, pick.activityInfo.name)
-            context.startActivity(intent)
-            PlaySearchResult.STARTED to pick.loadLabel(pm).toString()
-        } catch (e: Exception) {
-            Log.w(TAG, "play-from-search failed: ${e.message}")
-            PlaySearchResult.FAILED to null
+        val target = resolveTargetPlayer(
+            preferredPackage = preferredPlayer(),
+            availablePlayers = players(context),
+            isInstalled = { isPackageInstalled(context, it) },
+            resolveLabel = { resolveInstalledAppLabel(context, it) }
+        ) ?: return PlaySearchResult.NO_PLAYER to null
+
+        val (targetPackage, targetLabel) = target
+
+        val launchResult = backgroundLauncher.launch(
+            targetPackage = targetPackage,
+            query = query,
+            artist = artist,
+            song = song
+        )
+
+        return when (launchResult) {
+            BackgroundLaunchResult.SUCCESS -> PlaySearchResult.STARTED to targetLabel
+            BackgroundLaunchResult.NOT_SUPPORTED -> PlaySearchResult.BACKGROUND_NOT_SUPPORTED to targetLabel
+            BackgroundLaunchResult.FAILED -> PlaySearchResult.FAILED to targetLabel
         }
     }
 
@@ -331,6 +332,29 @@ class AndroidLocalPlatform(
             AndroidMusicPlayerScanner(context).getApplicationLabel(packageName)
         } catch (_: Exception) {
             null
+        }
+
+        /**
+         * Resolves the target player package and display label for playFromSearch:
+         * 1. If [preferredPackage] is specified and installed, resolves to it.
+         * 2. If [preferredPackage] is empty or uninstalled, automatically falls back to
+         *    the first available player from [availablePlayers].
+         * 3. If no players are available, returns null.
+         */
+        fun resolveTargetPlayer(
+            preferredPackage: String,
+            availablePlayers: List<Pair<String, String>>,
+            isInstalled: (packageName: String) -> Boolean,
+            resolveLabel: (packageName: String) -> String? = { null }
+        ): Pair<String, String>? {
+            val preferred = preferredPackage.trim()
+            if (preferred.isNotEmpty() && isInstalled(preferred)) {
+                val matched = availablePlayers.firstOrNull { it.first == preferred }
+                val label = matched?.second ?: resolveLabel(preferred) ?: preferred
+                return preferred to label
+            }
+            val autoPick = availablePlayers.firstOrNull() ?: return null
+            return autoPick.first to autoPick.second
         }
     }
 }
