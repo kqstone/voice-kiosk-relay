@@ -220,8 +220,8 @@ class HomeMusicWidgetControllerTest {
 
         controller.bind(playingState)
 
-        assertEquals("夜曲", fakeView.title)
-        assertEquals("周杰伦 · QQ音乐", fakeView.artistAndSource)
+        assertEquals("夜曲", fakeView.lastTitle)
+        assertEquals("周杰伦 · QQ音乐", fakeView.lastArtistAndSource)
         assertTrue("Play/Pause icon should indicate playing", fakeView.isPlayingIcon)
         assertEquals(30000L, fakeView.currentProgressMs)
         assertEquals(210000L, fakeView.durationProgressMs)
@@ -251,7 +251,7 @@ class HomeMusicWidgetControllerTest {
         )
         controller.bind(pausedState)
 
-        assertEquals("夜曲", fakeView.title)
+        assertEquals("夜曲", fakeView.lastTitle)
         assertFalse("Play/Pause icon should indicate paused", fakeView.isPlayingIcon)
         // Ticker should be removed
         assertEquals(0, fakeScheduler.delayedTasks.size)
@@ -269,7 +269,7 @@ class HomeMusicWidgetControllerTest {
 
         controller.bind(noPermState)
 
-        assertEquals("未授予通知使用权 · 点击开启", fakeView.artistAndSource)
+        assertEquals("未授予通知使用权 · 点击开启", fakeView.lastArtistAndSource)
         assertEquals(0, notificationSettingsOpenedCount)
 
         // Trigger settings click callback
@@ -397,8 +397,8 @@ class HomeMusicWidgetControllerTest {
     private class FakeHomeMusicWidgetView : HomeMusicWidgetView {
         var visible: Boolean = false
         var lastAnimate: Boolean = false
-        var title: String = ""
-        var artistAndSource: String = ""
+        var lastTitle: String = ""
+        var lastArtistAndSource: String = ""
         var currentProgressMs: Long = 0L
         var durationProgressMs: Long = 0L
         var isPlayingProgress: Boolean = false
@@ -415,11 +415,11 @@ class HomeMusicWidgetControllerTest {
         override fun isVisible(): Boolean = visible
 
         override fun setTitle(title: String) {
-            this.title = title
+            this.lastTitle = title
         }
 
         override fun setArtistAndSource(text: String) {
-            this.artistAndSource = text
+            this.lastArtistAndSource = text
         }
 
         override fun setProgress(currentMs: Long, durationMs: Long, isPlaying: Boolean) {
