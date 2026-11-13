@@ -72,8 +72,10 @@ jobs:
 
           echo "Secret scan passed successfully."
 
-      - name: Run version script tests
-        run: python3 -m unittest scripts/test_release_version.py
+      - name: Run release script tests
+        run: |
+          python3 -m unittest scripts/test_release_version.py
+          python3 -m unittest scripts/test_generate_release_metadata.py
 
       - name: Compute next release version
         id: version
@@ -243,10 +245,25 @@ jobs:
           path: release-assets
 
       - name: Prepare release assets and generate SHA256SUMS
+        env:
+          VERSION_NAME: ${{ needs.prepare-release.outputs.version_name }}
+          VERSION_CODE: ${{ needs.prepare-release.outputs.version_code }}
+          SEMVER: ${{ needs.prepare-release.outputs.semver }}
         run: |
           set -euo pipefail
-          if [ ! -f release-assets/app-release.apk ]; then
-            find release-assets -name "app-release.apk" -exec mv {} release-assets/app-release.apk \;
+          CANONICAL_APK="voice-kiosk-${VERSION_NAME}-arm64-v8a.apk"
+
+          if [ ! -f release-assets/app-release.apk ] && [ ! -f "release-assets/${CANONICAL_APK}" ]; then
+            find release-assets -name "*.apk" -exec mv {} release-assets/app-release.apk \;
+          fi
+
+          if [ -f release-assets/app-release.apk ]; then
+            mv release-assets/app-release.apk "release-assets/${CANONICAL_APK}"
+          fi
+
+          if [ ! -f "release-assets/${CANONICAL_APK}" ]; then
+            echo "ERROR: Release APK not found at release-assets/${CANONICAL_APK}" >&2
+            exit 1
           fi
 
           cp relay-bridge/docker-compose.yml release-assets/docker-compose.yml
@@ -257,8 +274,16 @@ jobs:
             exit 1
           fi
 
+          echo "Generating release-metadata.json for ${VERSION_NAME}..."
+          python3 scripts/generate_release_metadata.py \
+            --apk="release-assets/${CANONICAL_APK}" \
+            --tag-name="${VERSION_NAME}" \
+            --version-name="${SEMVER}" \
+            --version-code="${VERSION_CODE}" \
+            --output=release-assets/release-metadata.json
+
           cd release-assets
-          sha256sum app-release.apk docker-compose.yml example.env > SHA256SUMS
+          sha256sum "${CANONICAL_APK}" docker-compose.yml example.env release-metadata.json > SHA256SUMS
           echo "Generated SHA256SUMS:"
           cat SHA256SUMS
 
@@ -268,6 +293,7 @@ jobs:
           VERSION_NAME: ${{ needs.prepare-release.outputs.version_name }}
         run: |
           set -euo pipefail
+          CANONICAL_APK="voice-kiosk-${VERSION_NAME}-arm64-v8a.apk"
           cat <<EOF > release-notes.md
           ## Voice Kiosk Relay Release ${VERSION_NAME}
 
@@ -276,9 +302,10 @@ jobs:
           - ghcr.io/kqstone/voice-kiosk-relay:latest
 
           ### Release Assets
-          - app-release.apk: Signed Android APK
+          - ${CANONICAL_APK}: Signed Android APK (arm64-v8a)
           - docker-compose.yml: NAS deployment compose definition
           - example.env: Template environment variables (fill secrets on NAS only)
+          - release-metadata.json: Release metadata for in-app update checker
           - SHA256SUMS: Cryptographic checksums of release bundle files
 
           ### NAS Update Command
@@ -292,7 +319,8 @@ jobs:
             --title "Voice Kiosk Relay ${VERSION_NAME}" \
             --notes-file release-notes.md \
             --target "${GITHUB_SHA}" \
-            release-assets/app-release.apk \
+            "release-assets/${CANONICAL_APK}" \
             release-assets/docker-compose.yml \
             release-assets/example.env \
+            release-assets/release-metadata.json \
             release-assets/SHA256SUMS
