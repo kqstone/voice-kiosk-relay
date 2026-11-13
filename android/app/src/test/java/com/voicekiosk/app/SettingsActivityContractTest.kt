@@ -99,6 +99,7 @@ class SettingsActivityContractTest {
         assertTrue("Must save nightModeEndHour in AppConfig", content.contains("AppConfig.setNightModeEndHour"))
         assertTrue("Must save nightModeDimAlpha in AppConfig", content.contains("AppConfig.setNightModeDimAlpha"))
         assertTrue("Must save weatherLocation in AppConfig", content.contains("AppConfig.setWeatherLocation"))
+        assertTrue("Must save onDevicePlayerPackage in AppConfig", content.contains("AppConfig.setOnDevicePlayerPackage(this, onDevicePlayerPackage)"))
         assertTrue("Must reset cached weather if location changed", content.contains("AppConfig.setCachedWeatherSummary"))
         assertTrue("Must trigger fetchWeatherIfNeeded force=true on location change", content.contains("WeatherManager.fetchWeatherIfNeeded(applicationContext, force = true)"))
     }
@@ -145,5 +146,19 @@ class SettingsActivityContractTest {
 
         val progMax = ((0.95f - minDim) / step).roundToInt().coerceIn(0, maxSteps)
         assertEquals(13, progMax)
+    }
+
+    @Test
+    fun testSettingsActivity_musicPlayerSettingsContract() {
+        val file = locateSourceFile("SettingsActivity.kt")
+        val content = file.readText(StandardCharsets.UTF_8)
+
+        assertTrue("Must include 音乐播放设置 section", content.contains("\"音乐播放设置\""))
+        assertTrue("Must query AndroidLocalPlatform.players", content.contains("AndroidLocalPlatform.players(this)"))
+        assertTrue("Must read AppConfig.getOnDevicePlayerPackage", content.contains("AppConfig.getOnDevicePlayerPackage(this)"))
+        assertTrue("Must format player label via formatPlayerLabel", content.contains("AndroidLocalPlatform.formatPlayerLabel"))
+        assertTrue("Must display 自动选择（推荐） option", content.contains("\"自动选择（推荐）\""))
+        assertTrue("Must handle no player detected fallback", content.contains("\"未检测到可用音乐播放器\""))
+        assertTrue("Must prompt single choice dialog title 选择默认音乐播放器", content.contains("\"选择默认音乐播放器\""))
     }
 }

@@ -107,6 +107,7 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
 
     private var pendingBrowserDialog: AlertDialog? = null
     private var isActivityVisible: Boolean = false
+    private var refreshPlayerSettingsAction: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -120,6 +121,7 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         super.onStart()
         isActivityVisible = true
         AndroidReleaseUpdatePlatform.getManager(this).registerListener(this)
+        refreshPlayerSettingsAction?.invoke()
     }
 
     override fun onStop() {
@@ -1888,29 +1890,94 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         onDeviceWeatherCheckBox = check("本地查天气（Open-Meteo，免密钥；默认城市用上面的天气城市，失败时走云端）", AppConfig.isOnDeviceWeatherEnabled(this))
         onDeviceChitchatCheckBox = check("简单寒暄（你好/谢谢/早安/再见）在本机直接回答（固定话术）", AppConfig.isOnDeviceChitchatEnabled(this))
         onDevicePlayerPackage = AppConfig.getOnDevicePlayerPackage(this)
-        fun playerLabel(): String {
+
+        // ---- 音乐播放设置 ----
+        section("音乐播放设置")
+        val playerButton = Button(this).apply {
+            isAllCaps = false
+        }.also { card.addView(it) }
+        val playerStatusNote = note("")
+
+        fun refreshPlayerSettingUi() {
             val players = com.voicekiosk.app.ondevice.tools.AndroidLocalPlatform.players(this)
-            val name = players.firstOrNull { it.first == onDevicePlayerPackage }?.second
-            return "点歌播放器：" + when {
-                onDevicePlayerPackage.isEmpty() -> "自动（第一个可用）"
-                name != null -> name
-                else -> "$onDevicePlayerPackage（未安装）"
+            val hasPlayers = players.isNotEmpty()
+            val chosen = onDevicePlayerPackage
+
+            val displayLabel = com.voicekiosk.app.ondevice.tools.AndroidLocalPlatform.formatPlayerLabel(
+                storedPackage = chosen,
+                availablePlayers = players,
+                isInstalled = { pkg -> com.voicekiosk.app.ondevice.tools.AndroidLocalPlatform.isPackageInstalled(this, pkg) },
+                installedLabel = { pkg -> com.voicekiosk.app.ondevice.tools.AndroidLocalPlatform.resolveInstalledAppLabel(this, pkg) }
+            )
+
+            if (!hasPlayers && chosen.isEmpty()) {
+                playerButton.isEnabled = false
+                playerButton.alpha = 0.5f
+                playerButton.text = "默认音乐播放器：未检测到可用播放器"
+                playerStatusNote.text = "未检测到可用音乐播放器（建议安装网易云音乐或系统音乐）"
+                playerStatusNote.setTextColor(Color.parseColor("#9CA3AF"))
+            } else {
+                playerButton.isEnabled = true
+                playerButton.alpha = 1.0f
+                playerButton.text = "默认音乐播放器：$displayLabel"
+                if (!hasPlayers) {
+                    playerStatusNote.text = "注意：未检测到已扫描到的播放器，当前选定应用可能已被卸载或禁用"
+                    playerStatusNote.setTextColor(Color.parseColor("#F59E0B"))
+                } else {
+                    playerStatusNote.text = "自选用于语音点歌的播放器；当选定播放器不可用时自动回退为“自动选择”。"
+                    playerStatusNote.setTextColor(Color.parseColor("#A1A1AA"))
+                }
             }
         }
-        val playerButton = button(playerLabel()) { b ->
-            val players = com.voicekiosk.app.ondevice.tools.AndroidLocalPlatform.players(this)
-            val labels = (listOf("自动（第一个可用）") + players.map { it.second }).toTypedArray()
-            val pkgs = listOf("") + players.map { it.first }
+
+        playerButton.setOnClickListener {
+            val currentPlayers = com.voicekiosk.app.ondevice.tools.AndroidLocalPlatform.players(this)
+            val optionLabels = mutableListOf<String>()
+            val optionPkgs = mutableListOf<String>()
+
+            // First option: "自动选择（推荐）"
+            optionLabels.add("自动选择（推荐）")
+            optionPkgs.add("")
+
+            // Candidate players
+            for (player in currentPlayers) {
+                optionLabels.add("${player.second} (${player.first})")
+                optionPkgs.add(player.first)
+            }
+
+            // Stored package handling if uninstalled / missing from scan
+            val currentSelected = onDevicePlayerPackage
+            if (currentSelected.isNotEmpty() && !optionPkgs.contains(currentSelected)) {
+                val missingLabel = com.voicekiosk.app.ondevice.tools.AndroidLocalPlatform.formatPlayerLabel(
+                    storedPackage = currentSelected,
+                    availablePlayers = currentPlayers,
+                    isInstalled = { pkg -> com.voicekiosk.app.ondevice.tools.AndroidLocalPlatform.isPackageInstalled(this, pkg) },
+                    installedLabel = { pkg -> com.voicekiosk.app.ondevice.tools.AndroidLocalPlatform.resolveInstalledAppLabel(this, pkg) }
+                )
+                optionLabels.add(missingLabel)
+                optionPkgs.add(currentSelected)
+            }
+
+            var selectedIndex = optionPkgs.indexOf(currentSelected).coerceAtLeast(0)
+
             AlertDialog.Builder(this)
-                .setTitle(if (players.isEmpty()) "未找到支持语音点歌的播放器" else "选择点歌播放器")
-                .setSingleChoiceItems(labels, pkgs.indexOf(onDevicePlayerPackage).coerceAtLeast(0)) { dialog, which ->
-                    onDevicePlayerPackage = pkgs[which]
-                    b.text = playerLabel()
+                .setTitle(if (currentPlayers.isEmpty()) "未找到支持语音点歌的播放器" else "选择默认音乐播放器")
+                .setSingleChoiceItems(optionLabels.toTypedArray(), selectedIndex) { _, which ->
+                    selectedIndex = which
+                }
+                .setPositiveButton("确定") { dialog, _ ->
+                    if (selectedIndex in optionPkgs.indices) {
+                        onDevicePlayerPackage = optionPkgs[selectedIndex]
+                        refreshPlayerSettingUi()
+                    }
                     dialog.dismiss()
                 }
                 .setNegativeButton("取消", null)
                 .show()
         }
+
+        refreshPlayerSettingsAction = { refreshPlayerSettingUi() }
+        refreshPlayerSettingUi()
 
         // ---- 端侧模型（仅高档机） ----
         section("端侧模型（仅高档机）")

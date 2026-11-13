@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
@@ -133,15 +134,203 @@ class AndroidLocalPlatform(
         private const val TAG = "LocalPlatform"
         const val MAX_TIMERS = 5
 
-        /** Third-party players that accept play-from-search: (package, label). */
+        const val ACTION_MEDIA_BROWSER_SERVICE = "android.media.browse.MediaBrowserService"
+        const val ACTION_MEDIA_BROWSER_SERVICE_COMPAT = "androidx.media.MediaBrowserServiceCompat"
+
+        /**
+         * Discovered candidate player item before deduplication.
+         */
+        data class DiscoveredCandidate(
+            val packageName: String,
+            val label: String
+        )
+
+        /**
+         * Scanner interface for discovering music players and checking package state.
+         * Allows comprehensive unit testing with simulated package managers without Android runtime stubs.
+         */
+        interface MusicPlayerScanner {
+            fun queryActivityPlayers(): List<DiscoveredCandidate>
+            fun queryServicePlayers(): List<DiscoveredCandidate>
+            fun isPackageInstalled(packageName: String): Boolean
+            fun getApplicationLabel(packageName: String): String?
+        }
+
+        /**
+         * Android runtime implementation of [MusicPlayerScanner] using [PackageManager].
+         */
+        class AndroidMusicPlayerScanner(private val context: Context) : MusicPlayerScanner {
+            private val pm: PackageManager get() = context.packageManager
+
+            override fun queryActivityPlayers(): List<DiscoveredCandidate> {
+                val results = mutableListOf<DiscoveredCandidate>()
+
+                // 1. MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH (Flag 0 so non-DEFAULT categories are included)
+                try {
+                    val searchIntent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+                    val activities = pm.queryIntentActivities(searchIntent, 0)
+                    for (info in activities) {
+                        val pkg = info.activityInfo?.packageName ?: continue
+                        val label = resolveLabel(pkg, info)
+                        results.add(DiscoveredCandidate(pkg, label))
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed querying MEDIA_PLAY_FROM_SEARCH activities: ${e.message}")
+                }
+
+                // 2. Intent.ACTION_MAIN with Intent.CATEGORY_APP_MUSIC
+                try {
+                    val musicAppIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_MUSIC)
+                    val activities = pm.queryIntentActivities(musicAppIntent, 0)
+                    for (info in activities) {
+                        val pkg = info.activityInfo?.packageName ?: continue
+                        val label = resolveLabel(pkg, info)
+                        results.add(DiscoveredCandidate(pkg, label))
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed querying CATEGORY_APP_MUSIC activities: ${e.message}")
+                }
+
+                return results
+            }
+
+            override fun queryServicePlayers(): List<DiscoveredCandidate> {
+                val results = mutableListOf<DiscoveredCandidate>()
+
+                // 1. Standard MediaBrowserService
+                try {
+                    val mbsIntent = Intent(ACTION_MEDIA_BROWSER_SERVICE)
+                    val services = pm.queryIntentServices(mbsIntent, 0)
+                    for (info in services) {
+                        val pkg = info.serviceInfo?.packageName ?: continue
+                        val label = resolveLabel(pkg, info)
+                        results.add(DiscoveredCandidate(pkg, label))
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed querying MediaBrowserService services: ${e.message}")
+                }
+
+                // 2. AndroidX MediaBrowserServiceCompat
+                try {
+                    val compatIntent = Intent(ACTION_MEDIA_BROWSER_SERVICE_COMPAT)
+                    val services = pm.queryIntentServices(compatIntent, 0)
+                    for (info in services) {
+                        val pkg = info.serviceInfo?.packageName ?: continue
+                        val label = resolveLabel(pkg, info)
+                        results.add(DiscoveredCandidate(pkg, label))
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed querying MediaBrowserServiceCompat services: ${e.message}")
+                }
+
+                return results
+            }
+
+            override fun isPackageInstalled(packageName: String): Boolean {
+                if (packageName.isBlank()) return false
+                return try {
+                    pm.getPackageInfo(packageName, 0)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+
+            override fun getApplicationLabel(packageName: String): String? {
+                if (packageName.isBlank()) return null
+                return try {
+                    val appInfo = pm.getApplicationInfo(packageName, 0)
+                    pm.getApplicationLabel(appInfo).toString()
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
+            private fun resolveLabel(pkg: String, resolveInfo: ResolveInfo): String {
+                return try {
+                    val appInfo = pm.getApplicationInfo(pkg, 0)
+                    pm.getApplicationLabel(appInfo).toString()
+                } catch (_: Exception) {
+                    resolveInfo.loadLabel(pm).toString()
+                }.ifBlank { pkg }
+            }
+        }
+
+        /**
+         * Scans and aggregates player candidates from both activity and service dimensions,
+         * filtering out [ownPackageName] and deduplicating by package name.
+         */
+        fun scanPlayers(
+            ownPackageName: String,
+            scanner: MusicPlayerScanner
+        ): List<Pair<String, String>> {
+            val result = mutableListOf<Pair<String, String>>()
+            val seen = mutableSetOf<String>()
+
+            val allCandidates = scanner.queryActivityPlayers() + scanner.queryServicePlayers()
+            for (candidate in allCandidates) {
+                val pkg = candidate.packageName.trim()
+                if (pkg.isEmpty() || pkg == ownPackageName || !seen.add(pkg)) {
+                    continue
+                }
+                val label = candidate.label.ifBlank {
+                    scanner.getApplicationLabel(pkg) ?: pkg
+                }
+                result.add(pkg to label)
+            }
+            return result
+        }
+
+        /**
+         * Third-party players that accept music playback: (package, label).
+         * Scans both activity and service dimensions per Phase 1 specification.
+         */
         fun players(context: Context): List<Pair<String, String>> = try {
-            val pm = context.packageManager
-            pm.queryIntentActivities(Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH), PackageManager.MATCH_DEFAULT_ONLY)
-                .filter { it.activityInfo.packageName != context.packageName }
-                .map { it.activityInfo.packageName to it.loadLabel(pm).toString() }
-                .distinctBy { it.first }
-        } catch (_: Exception) {
+            scanPlayers(context.packageName, AndroidMusicPlayerScanner(context))
+        } catch (e: Exception) {
+            Log.w(TAG, "players scan failed: ${e.message}")
             emptyList()
+        }
+
+        /**
+         * Formats a user-facing label for the selected player package, properly handling:
+         * - Empty string -> "自动选择（推荐）"
+         * - Available scanned player -> player's display label
+         * - Installed package not in scan list -> application label or package name
+         * - Uninstalled package -> "$storedPackage（已卸载）"
+         */
+        fun formatPlayerLabel(
+            storedPackage: String,
+            availablePlayers: List<Pair<String, String>>,
+            isInstalled: (packageName: String) -> Boolean,
+            installedLabel: (packageName: String) -> String? = { null }
+        ): String {
+            val trimmed = storedPackage.trim()
+            if (trimmed.isEmpty()) {
+                return "自动选择（推荐）"
+            }
+            val matched = availablePlayers.firstOrNull { it.first == trimmed }
+            if (matched != null) {
+                return matched.second
+            }
+            if (isInstalled(trimmed)) {
+                return installedLabel(trimmed) ?: trimmed
+            }
+            return "$trimmed（已卸载）"
+        }
+
+        /** Checks if a package is currently installed. */
+        fun isPackageInstalled(context: Context, packageName: String): Boolean = try {
+            AndroidMusicPlayerScanner(context).isPackageInstalled(packageName)
+        } catch (_: Exception) {
+            false
+        }
+
+        /** Resolves the display label for an installed package, or null if missing. */
+        fun resolveInstalledAppLabel(context: Context, packageName: String): String? = try {
+            AndroidMusicPlayerScanner(context).getApplicationLabel(packageName)
+        } catch (_: Exception) {
+            null
         }
     }
 }

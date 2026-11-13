@@ -11,10 +11,25 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
-    <!-- S1 local tool "点歌": find third-party players that accept play-from-search (Android 11+ package visibility). -->
+    <!-- Music player discovery for Android 11+ (package visibility).
+         Discovers players via play-from-search, music category activities, and media browser services. -->
     <queries>
+        <!-- Activity dimension: play-from-search -->
         <intent>
             <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
+        </intent>
+        <!-- Activity dimension: system music category -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_MUSIC" />
+        </intent>
+        <!-- Service dimension: standard MediaBrowserService -->
+        <intent>
+            <action android:name="android.media.browse.MediaBrowserService" />
+        </intent>
+        <!-- Service dimension: AndroidX MediaBrowserServiceCompat -->
+        <intent>
+            <action android:name="androidx.media.MediaBrowserServiceCompat" />
         </intent>
     </queries>
 

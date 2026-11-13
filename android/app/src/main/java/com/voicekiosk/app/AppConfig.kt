@@ -84,7 +84,8 @@ object AppConfig {
     private const val KEY_ONDEVICE_CHITCHAT_ENABLED = "pref_ondevice_chitchat_enabled"
     private const val KEY_ONDEVICE_SPECULATIVE_CLOUD = "pref_ondevice_speculative_cloud"
     private const val KEY_ONDEVICE_WEATHER_ENABLED = "pref_ondevice_weather_enabled"
-    private const val KEY_ONDEVICE_PLAYER_PACKAGE = "pref_ondevice_player_package"
+    const val KEY_ONDEVICE_PLAYER_PACKAGE = "pref_ondevice_player_package"
+    const val DEFAULT_ONDEVICE_PLAYER_PACKAGE = ""
     private const val KEY_WEATHER_CITY = "pref_weather_city"
     private const val KEY_WEATHER_LATITUDE = "pref_weather_latitude"
     private const val KEY_WEATHER_LONGITUDE = "pref_weather_longitude"
@@ -113,8 +114,11 @@ object AppConfig {
         prefs(context).edit().remove(KEY_DEVICE_TOKEN).apply()
     }
 
+    @Volatile
+    internal var prefsOverride: SharedPreferences? = null
+
     private fun prefs(context: Context): SharedPreferences {
-        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefsOverride ?: context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
     /**
@@ -299,12 +303,26 @@ object AppConfig {
         prefs(context).edit().putBoolean(KEY_ONDEVICE_WEATHER_ENABLED, enabled).apply()
     }
 
-    /** Player package for "播放…" ("" = first player found). */
-    fun getOnDevicePlayerPackage(context: Context): String =
-        prefs(context).getString(KEY_ONDEVICE_PLAYER_PACKAGE, "") ?: ""
+    /**
+     * Normalizes a player package name: null or blank becomes "", and non-empty package names
+     * are trimmed and returned as-is. An empty string signifies automatic selection.
+     */
+    fun normalizePlayerPackage(pkg: String?): String =
+        pkg?.trim().orEmpty()
 
-    fun setOnDevicePlayerPackage(context: Context, pkg: String) {
-        prefs(context).edit().putString(KEY_ONDEVICE_PLAYER_PACKAGE, pkg).apply()
+    /** Player package for "播放…" ("" = automatic selection / first player found). */
+    fun getOnDevicePlayerPackage(context: Context): String =
+        getOnDevicePlayerPackage(prefs(context))
+
+    fun setOnDevicePlayerPackage(context: Context, pkg: String?) {
+        setOnDevicePlayerPackage(prefs(context), pkg)
+    }
+
+    fun getOnDevicePlayerPackage(prefs: SharedPreferences): String =
+        normalizePlayerPackage(prefs.getString(KEY_ONDEVICE_PLAYER_PACKAGE, DEFAULT_ONDEVICE_PLAYER_PACKAGE))
+
+    fun setOnDevicePlayerPackage(prefs: SharedPreferences, pkg: String?) {
+        prefs.edit().putString(KEY_ONDEVICE_PLAYER_PACKAGE, normalizePlayerPackage(pkg)).apply()
     }
 
     fun getWeatherCity(context: Context): String =
