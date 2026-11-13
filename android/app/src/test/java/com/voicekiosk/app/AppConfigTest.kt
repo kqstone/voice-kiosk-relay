@@ -1,8 +1,8 @@
 package com.voicekiosk.app
 
+import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
-import android.test.mock.MockContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -73,9 +73,11 @@ class AppConfigTest {
         try {
             AppConfig.prefsOverride = prefs
             // Context is an abstract class, so it cannot be faked with a dynamic
-            // proxy (Proxy only works on interfaces). MockContext is never touched:
-            // prefs() short-circuits on prefsOverride above.
-            val dummyContext: Context = MockContext()
+            // proxy (Proxy only works on interfaces), and android.test.mock is not
+            // on the local unit-test classpath. A bare Application instance works:
+            // prefs() short-circuits on prefsOverride above, so no Context method
+            // is ever invoked on it.
+            val dummyContext: Context = Application()
 
             AppConfig.setOnDevicePlayerPackage(dummyContext, "com.kugou.android")
             assertEquals("com.kugou.android", AppConfig.getOnDevicePlayerPackage(dummyContext))
