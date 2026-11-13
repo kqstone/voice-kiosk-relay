@@ -276,13 +276,15 @@ class AndroidLocalPlatform(
             val activityCandidates = try {
                 scanner.queryActivityPlayers()
             } catch (e: Exception) {
-                Log.w(TAG, "activity player scan failed: ${e.message}")
+                // Deliberately no Log call here: android.util.Log throws in local
+                // unit tests (stub android.jar), so logging would re-throw and
+                // defeat the graceful degradation this catch exists for.
                 emptyList()
             }
             val serviceCandidates = try {
                 scanner.queryServicePlayers()
             } catch (e: Exception) {
-                Log.w(TAG, "service player scan failed: ${e.message}")
+                // Same as above: no Log call, return empty for this dimension.
                 emptyList()
             }
             val allCandidates = activityCandidates + serviceCandidates
