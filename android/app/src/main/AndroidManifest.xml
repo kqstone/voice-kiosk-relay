@@ -24,7 +24,7 @@
         android:label="Voice Kiosk"
         android:roundIcon="@android:drawable/sym_def_app_icon"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+        android:theme="@style/Theme.VoiceKiosk"
         android:usesCleartextTraffic="true">
 
         <activity
@@ -33,6 +33,7 @@
             android:exported="true"
             android:launchMode="singleInstance"
             android:showWhenLocked="true"
+            android:theme="@style/Theme.VoiceKiosk"
             android:turnScreenOn="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

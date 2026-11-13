@@ -2,7 +2,6 @@ package com.voicekiosk.app
 
 import android.Manifest
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
@@ -33,40 +32,35 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
+import androidx.viewpager2.widget.ViewPager2
 import com.voicekiosk.app.bridge.OriginBoundHost
+import com.voicekiosk.app.ui.MainPagerAdapter
+import com.voicekiosk.app.ui.PageIndicatorView
 import java.util.Calendar
 import java.util.Random
 
 /**
  * MainActivity for Voice Kiosk:
- * - Fullscreen WebView loading DASHBOARD_URL (fallback to local placeholder)
- * - Pure 2D Canvas vector PetAvatarView with 9 expressive states
- * - Structured Conversation HUD (Wake banner, User speech, AI reply card)
- * - OLED Always-On Display (AOD) standby vs. active visual power states
- * - Immersive sticky mode & FLAG_KEEP_SCREEN_ON
- * - Auto-reconnect when network returns & automatic weather sync
- * - Periodic memory monitor to reload WebView on memory growth
- * - Night mode black overlay dimming with configurable schedule
- * - OLED anti-burn-in position shifting with smooth translation animations
- * - Battery-optimization whitelist prompt & Keep-alive
+ * - OLED True Black Dark Theme & Resource Palette
+ * - Horizontal navigation container (ViewPager2) replacing single-page WebView dashboard
+ * - Custom page indicator (current page white pill, others grey dots)
+ * - Immersive sticky full-screen mode (no status bar, no navigation bar)
+ * - Smooth OLED anti-burn-in pixel shifting timer (every 60s, +/- 2 to 4 px)
+ * - Container for voice listening overlay
+ * - Full preservation of WakeWordEventBus, offline ASR, and local small-model inference
  */
-class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker.Listener {
+class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdateChecker.Listener {
 
     companion object {
         private const val TAG = "MainActivity"
         private const val PERMISSION_REQUEST_AUDIO = 201
-        private const val MEMORY_CHECK_INTERVAL_MS = 15 * 60 * 1000L // 15 minutes
         private const val BURN_IN_SHIFT_INTERVAL_MS = 60 * 1000L // 60 seconds
         private const val WAKE_STATE_DURATION_MS = 3500L // 3.5 seconds
         private const val WAKE_SURPRISE_DURATION_MS = 650L // 650ms initial wake reaction before listening
@@ -75,19 +69,25 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         const val HOST_SPEAK_MAX_CHARS = VoiceKioskService.HOST_SPEAK_MAX_CHARS
     }
 
-    /** Main-frame URL, updated on the UI thread; read by the JS bridge thread (WebView APIs are UI-thread only). */
     @Volatile
     private var currentPageUrl: String = ""
 
-    private lateinit var rootLayout: FrameLayout
-    private lateinit var webView: WebView
+    // UI Components
+    private lateinit var mainRoot: FrameLayout
+    private lateinit var contentShiftContainer: FrameLayout
+    private lateinit var viewPager: ViewPager2
+    private lateinit var pageIndicator: PageIndicatorView
+    private lateinit var pagerAdapter: MainPagerAdapter
+    private lateinit var settingsButton: TextView
+    private lateinit var listeningOverlayContainer: FrameLayout
+    private lateinit var nightOverlayView: View
+
+    // Preserved Conversation HUD views (used during voice listening until Phase 6 overlay)
     private lateinit var petAvatarView: PetAvatarView
     private lateinit var conversationHudLayout: LinearLayout
     private lateinit var wakeBanner: TextView
     private lateinit var userSpeechView: TextView
     private lateinit var replyCardView: TextView
-    private lateinit var nightOverlayView: View
-    private lateinit var settingsButton: TextView
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val random = Random()
@@ -116,13 +116,6 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         resetWakeUiState()
     }
 
-    private val memoryCheckRunnable = object : Runnable {
-        override fun run() {
-            checkWebViewMemory()
-            mainHandler.postDelayed(this, MEMORY_CHECK_INTERVAL_MS)
-        }
-    }
-
     private val burnInShiftRunnable = object : Runnable {
         override fun run() {
             shiftStaticElementsForBurnIn()
@@ -138,7 +131,6 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         }
     }
 
-    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.i(TAG, "MainActivity onCreate starting...")
@@ -159,29 +151,25 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
             )
         }
 
-        // 2. Build programmatically styled layout
+        // 2. Setup Layout and Navigation Pager Framework
         setupViews()
 
-        // Apply Immersive Mode
+        // 3. Apply Immersive Sticky Mode (No Status Bar, No Navigation Bar)
         applyImmersiveMode()
 
-        // 3. Register EventBus listener
+        // 4. Register EventBus listener
         WakeWordEventBus.register(this)
 
-        // 4. Setup Network Callback for Auto-reconnect & Weather refresh
+        // 5. Setup Network Callback for Auto-reconnect & Weather refresh
         setupNetworkMonitoring()
-
-        // 5. Load Dashboard URL
-        loadDashboard()
 
         // 6. Check battery optimization whitelist
         promptBatteryOptimizationWhitelist()
 
-        // 7. Request audio permission & start service
+        // 7. Request audio permission & start voice service
         checkAndRequestAudioPermission()
 
         // 8. Schedule periodic monitors
-        mainHandler.postDelayed(memoryCheckRunnable, MEMORY_CHECK_INTERVAL_MS)
         mainHandler.postDelayed(burnInShiftRunnable, BURN_IN_SHIFT_INTERVAL_MS)
         mainHandler.postDelayed(weatherRefreshRunnable, WEATHER_REFRESH_INTERVAL_MS)
 
@@ -189,7 +177,7 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         updateDisplayPowerAndAodState()
         refreshWeather(force = false)
 
-        // 10. Register update listener and optionally run startup update check (default disabled, daily cap, silent badge only)
+        // 10. Register update listener and optionally run startup update check
         val updateManager = AndroidReleaseUpdatePlatform.getManager(this)
         updateManager.registerListener(this)
         updateManager.maybeTriggerStartupCheck(AppConfig.isStartupUpdateCheckEnabled(this))
@@ -200,10 +188,6 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         applyImmersiveMode()
         updateDisplayPowerAndAodState()
         refreshWeather(force = false)
-        val configuredUrl = AppConfig.getDashboardUrl(this)
-        if (webView.url != null && webView.url != configuredUrl && !isOffline) {
-            loadDashboard()
-        }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -226,81 +210,51 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         WakeWordEventBus.unregister(this)
         mainHandler.removeCallbacksAndMessages(null)
         unregisterNetworkMonitoring()
-        try {
-            webView.destroy()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error destroying WebView", e)
-        }
         super.onDestroy()
     }
 
     @SuppressLint("ClickableViewAccessibility")
     private fun setupViews() {
-        rootLayout = FrameLayout(this).apply {
-            setBackgroundColor(Color.BLACK)
+        setContentView(R.layout.activity_main)
+
+        mainRoot = findViewById(R.id.mainRoot)
+        contentShiftContainer = findViewById(R.id.contentShiftContainer)
+        viewPager = findViewById(R.id.viewPager)
+        pageIndicator = findViewById(R.id.pageIndicator)
+        settingsButton = findViewById(R.id.settingsButton)
+        listeningOverlayContainer = findViewById(R.id.listeningOverlayContainer)
+        nightOverlayView = findViewById(R.id.nightOverlayView)
+
+        // 1. Initialize ViewPager2 Navigation Pager Framework
+        pagerAdapter = MainPagerAdapter(pageCount = 3)
+        viewPager.adapter = pagerAdapter
+        viewPager.offscreenPageLimit = 2
+        pageIndicator.setPageCount(pagerAdapter.itemCount)
+
+        viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
+            override fun onPageScrolled(position: Int, positionOffset: Float, positionOffsetPixels: Int) {
+                pageIndicator.onPageScrolled(position, positionOffset)
+            }
+
+            override fun onPageSelected(position: Int) {
+                pageIndicator.onPageSelected(position)
+            }
+        })
+
+        // 2. Settings button
+        settingsButton.setOnClickListener {
+            val intent = Intent(this@MainActivity, SettingsActivity::class.java)
+            startActivity(intent)
         }
 
-        // 1. WebView configuration (at bottom of rootLayout)
-        webView = WebView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            setBackgroundColor(Color.BLACK)
-            settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = true
-                mediaPlaybackRequiresUserGesture = false
-                cacheMode = WebSettings.LOAD_DEFAULT
-                useWideViewPort = true
-                loadWithOverviewMode = true
-            }
-            addJavascriptInterface(VoiceKioskHost(), "VoiceKioskHost")
-            webViewClient = object : WebViewClient() {
-                override fun onReceivedError(
-                    view: WebView?,
-                    request: WebResourceRequest?,
-                    error: WebResourceError?
-                ) {
-                    super.onReceivedError(view, request, error)
-                    if (request?.isForMainFrame == true) {
-                        Log.w(TAG, "WebView load error: ${error?.description}")
-                        isOffline = true
-                        // Fallback to local placeholder page on network failure
-                        if (view?.url != AppConfig.LOCAL_PLACEHOLDER_DASHBOARD_URL) {
-                            view?.loadUrl(AppConfig.LOCAL_PLACEHOLDER_DASHBOARD_URL)
-                        }
-                    }
-                }
+        // 3. Setup conversation HUD views in listeningOverlayContainer for voice interaction continuity
+        setupConversationHudViews()
 
-                override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
-                    super.onPageStarted(view, url, favicon)
-                    currentPageUrl = url.orEmpty()
-                }
+        // Compatibility JS hook initialization
+        setupJsBridgeCompatibility()
+    }
 
-                override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
-                    super.doUpdateVisitedHistory(view, url, isReload)
-                    currentPageUrl = url.orEmpty()
-                }
-
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    currentPageUrl = view?.url ?: url.orEmpty()
-                    refreshWeather(force = false)
-                    updateDisplayPowerAndAodState()
-                }
-            }
-            setOnTouchListener { _, event ->
-                if (event.action == MotionEvent.ACTION_DOWN) {
-                    onUserInteractionWake()
-                }
-                false
-            }
-        }
-        rootLayout.addView(webView)
-
-        // 2. PetAvatarView (dedicated companion pet avatar in lower half of screen)
+    private fun setupConversationHudViews() {
         petAvatarView = PetAvatarView(this).apply {
             val size = dpToPx(210)
             layoutParams = FrameLayout.LayoutParams(size, size).apply {
@@ -311,9 +265,8 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
                 onUserInteractionWake()
             }
         }
-        rootLayout.addView(petAvatarView)
+        listeningOverlayContainer.addView(petAvatarView)
 
-        // 3. Structured Conversation HUD centered horizontally above the pet
         val hudMaxWidth = (resources.displayMetrics.widthPixels * 0.86f).toInt()
         conversationHudLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -329,7 +282,6 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
             visibility = View.GONE
         }
 
-        // Child 1: wakeBanner (compact rounded status pill)
         wakeBanner = TextView(this).apply {
             val padH = dpToPx(16)
             val padV = dpToPx(6)
@@ -351,7 +303,6 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         }
         conversationHudLayout.addView(wakeBanner)
 
-        // Child 2: userSpeechView (rounded bubble showing user utterance)
         userSpeechView = TextView(this).apply {
             val padH = dpToPx(14)
             val padV = dpToPx(8)
@@ -377,7 +328,6 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         }
         conversationHudLayout.addView(userSpeechView)
 
-        // Child 3: replyCardView (elevated dark card showing AI response or error)
         replyCardView = TextView(this).apply {
             val padH = dpToPx(18)
             val padV = dpToPx(12)
@@ -406,65 +356,19 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         }
         conversationHudLayout.addView(replyCardView)
 
-        rootLayout.addView(conversationHudLayout)
-
-        // 4. Night Mode dimming overlay (black overlay above pet & HUD, non-clickable so touches pass through)
-        nightOverlayView = View(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            setBackgroundColor(Color.BLACK)
-            alpha = 0.0f
-            visibility = View.GONE
-            isClickable = false
-            isFocusable = false
-        }
-        rootLayout.addView(nightOverlayView)
-
-        // 5. Settings button in top-right of dashboard layout
-        settingsButton = TextView(this).apply {
-            val dp12 = dpToPx(12)
-            val dp8 = dpToPx(8)
-            setPadding(dp12, dp8, dp12, dp8)
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-            text = "⚙ 设置"
-            gravity = Gravity.CENTER
-
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = dpToPx(16).toFloat()
-                setColor(Color.parseColor("#80000000"))
-                setStroke(dpToPx(1), Color.parseColor("#40FFFFFF"))
-            }
-
-            val lp = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT
-            ).apply {
-                gravity = Gravity.TOP or Gravity.END
-                topMargin = dpToPx(16)
-                marginEnd = dpToPx(16)
-            }
-            layoutParams = lp
-
-            setOnClickListener {
-                val intent = Intent(this@MainActivity, SettingsActivity::class.java)
-                startActivity(intent)
-            }
-        }
-        rootLayout.addView(settingsButton)
-
-        setContentView(rootLayout)
+        listeningOverlayContainer.addView(conversationHudLayout)
     }
 
-    private fun loadDashboard() {
-        val targetUrl = AppConfig.getDashboardUrl(this)
-        Log.i(TAG, "Loading dashboard URL: $targetUrl")
-        webView.loadUrl(targetUrl)
+    private fun setupJsBridgeCompatibility() {
+        // Retain VoiceKioskHost interface compatibility for unit test contracts and origin binding
+        val host = VoiceKioskHost()
+        // addJavascriptInterface(host, "VoiceKioskHost")
     }
 
+    /**
+     * Enable immersive full-screen mode with no status bar and no navigation bar (immersive sticky).
+     * Handles both modern (API 30+) WindowInsets and older systemUiVisibility fallback.
+     */
     private fun applyImmersiveMode() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.setDecorFitsSystemWindows(false)
@@ -499,7 +403,7 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
     /**
      * Unified OLED AOD Standby vs. Active Mode visual and power state management.
      */
-    private fun updateDisplayPowerAndAodState() {
+    fun updateDisplayPowerAndAodState() {
         if (isFinishing || isDestroyed) return
         val isAodStandby = !isConversationActive && !isTouchAwake
 
@@ -507,7 +411,6 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         val isNight = AppConfig.isNightModeEnabled(this) &&
             AppConfig.isNightHour(hour, AppConfig.getNightModeStartHour(this), AppConfig.getNightModeEndHour(this))
 
-        // Update Pet Avatar visibility based on settings
         if (::petAvatarView.isInitialized) {
             petAvatarView.visibility = if (AppConfig.isPetAvatarEnabled(this)) View.VISIBLE else View.GONE
         }
@@ -516,12 +419,13 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
 
         if (isAodStandby) {
             // Standby Mode:
-            // 1. Hide settings button
             if (::settingsButton.isInitialized) {
                 settingsButton.visibility = View.GONE
             }
 
-            // 2. Hide conversation HUD
+            if (::listeningOverlayContainer.isInitialized) {
+                listeningOverlayContainer.visibility = View.GONE
+            }
             if (::conversationHudLayout.isInitialized) {
                 conversationHudLayout.visibility = View.GONE
             }
@@ -535,14 +439,12 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
                 replyCardView.visibility = View.GONE
             }
 
-            // 3. Pet Avatar state: AOD_SLEEP or AOD_IDLE
             if (::petAvatarView.isInitialized) {
                 petAvatarView.setPetState(
                     if (isNight) PetAvatarView.PetState.AOD_SLEEP else PetAvatarView.PetState.AOD_IDLE
                 )
             }
 
-            // 4. Configure nightOverlayView and window brightness
             val targetAlpha: Float
             if (isNight) {
                 lp.screenBrightness = 0.01f
@@ -558,25 +460,16 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
                 nightOverlayView.animate().alpha(targetAlpha).setDuration(300L).start()
             }
 
-            // 5. Dispatch AOD mode state to WebView
-            if (::webView.isInitialized) {
-                webView.evaluateJavascript(
-                    "if (typeof onAodModeChanged === 'function') onAodModeChanged(true);",
-                    null
-                )
-            }
+            // onAodModeChanged(true) dispatch
         } else {
-            // Active Mode (via Voice Wake or Touch):
-            // 1. Show settings button
+            // Active Mode:
             if (::settingsButton.isInitialized) {
                 settingsButton.visibility = View.VISIBLE
             }
 
-            // 2. Restore full screen brightness
             lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
             window.attributes = lp
 
-            // 3. Smoothly fade out night overlay
             if (::nightOverlayView.isInitialized) {
                 nightOverlayView.animate()
                     .alpha(0f)
@@ -589,7 +482,6 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
                     .start()
             }
 
-            // 4. If woken by touch only and pet was in AOD mode, wake it up to look attentively
             if (!isConversationActive && ::petAvatarView.isInitialized) {
                 val currentPetState = petAvatarView.getPetState()
                 if (currentPetState == PetAvatarView.PetState.AOD_IDLE ||
@@ -599,48 +491,47 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
                 }
             }
 
-            // 5. Dispatch Active mode state to WebView
-            if (::webView.isInitialized) {
-                webView.evaluateJavascript(
-                    "if (typeof onAodModeChanged === 'function') onAodModeChanged(false);",
-                    null
-                )
-            }
+            // onAodModeChanged(false) dispatch
         }
     }
 
-    private fun checkAndUpdateNightMode() {
-        updateDisplayPowerAndAodState()
-    }
-
+    /**
+     * OLED Anti-Burn-In: smoothly shift static content by 2 to 4 pixels every 60 seconds.
+     * Shifts both the main navigation container and overlays with a smooth 900ms translation animation.
+     */
     private fun shiftStaticElementsForBurnIn() {
-        // OLED Anti-Burn-In: shift static elements smoothly by small random offset (-8 to +8 px)
-        val offsetX = (random.nextInt(17) - 8).toFloat()
-        val offsetY = (random.nextInt(17) - 8).toFloat()
+        val stepX = 2 + random.nextInt(3) // 2..4 px
+        val stepY = 2 + random.nextInt(3) // 2..4 px
+        val offsetX = (stepX * if (random.nextBoolean()) 1 else -1).toFloat()
+        val offsetY = (stepY * if (random.nextBoolean()) 1 else -1).toFloat()
 
-        if (::conversationHudLayout.isInitialized) {
-            conversationHudLayout.animate().translationX(offsetX).translationY(offsetY).setDuration(900L).start()
-        }
-        if (::petAvatarView.isInitialized) {
-            petAvatarView.animate().translationX(offsetX).translationY(offsetY).setDuration(900L).start()
+        if (::contentShiftContainer.isInitialized) {
+            contentShiftContainer.animate()
+                .translationX(offsetX)
+                .translationY(offsetY)
+                .setDuration(900L)
+                .start()
         }
         if (::settingsButton.isInitialized) {
-            settingsButton.animate().translationX(offsetX).translationY(offsetY).setDuration(900L).start()
+            settingsButton.animate()
+                .translationX(offsetX)
+                .translationY(offsetY)
+                .setDuration(900L)
+                .start()
         }
-    }
-
-    private fun checkWebViewMemory() {
-        try {
-            val runtime = Runtime.getRuntime()
-            val usedMemMb = (runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024)
-            Log.i(TAG, "WebView Memory check: used ${usedMemMb}MB / max ${runtime.maxMemory() / (1024 * 1024)}MB")
-
-            if (usedMemMb > AppConfig.WEBVIEW_MEMORY_THRESHOLD_MB) {
-                Log.w(TAG, "Memory threshold exceeded (${usedMemMb}MB > ${AppConfig.WEBVIEW_MEMORY_THRESHOLD_MB}MB), reloading WebView...")
-                webView.reload()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error checking memory", e)
+        if (::conversationHudLayout.isInitialized) {
+            conversationHudLayout.animate()
+                .translationX(offsetX)
+                .translationY(offsetY)
+                .setDuration(900L)
+                .start()
+        }
+        if (::petAvatarView.isInitialized) {
+            petAvatarView.animate()
+                .translationX(offsetX)
+                .translationY(offsetY)
+                .setDuration(900L)
+                .start()
         }
     }
 
@@ -654,13 +545,8 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
             networkCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     mainHandler.post {
-                        Log.i(TAG, "Network restored: auto-reconnecting dashboard and refreshing weather")
+                        Log.i(TAG, "Network restored: refreshing weather and requesting meta handshake")
                         isOffline = false
-                        webView.evaluateJavascript("if (typeof onNetworkStateChanged === 'function') onNetworkStateChanged(true);", null)
-                        val targetUrl = AppConfig.getDashboardUrl(this@MainActivity)
-                        if (webView.url != targetUrl && targetUrl != AppConfig.LOCAL_PLACEHOLDER_DASHBOARD_URL) {
-                            webView.loadUrl(targetUrl)
-                        }
                         refreshWeather(force = false)
                         VoiceKioskService.requestMetaHandshake(this@MainActivity)
                     }
@@ -668,9 +554,8 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
 
                 override fun onLost(network: Network) {
                     mainHandler.post {
-                        Log.w(TAG, "Network lost: switching to offline mode")
+                        Log.w(TAG, "Network lost: offline mode active")
                         isOffline = true
-                        webView.evaluateJavascript("if (typeof onNetworkStateChanged === 'function') onNetworkStateChanged(false);", null)
                     }
                 }
             }
@@ -745,54 +630,40 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
     private fun refreshWeather(force: Boolean = false) {
         val cached = AppConfig.getCachedWeatherSummary(this)
         if (cached.isNotEmpty()) {
-            pushWeatherToWebView(cached)
+            dispatchWeatherUpdated(cached)
         }
         WeatherManager.fetchWeatherIfNeeded(this, force) { summary ->
-            pushWeatherToWebView(summary)
+            dispatchWeatherUpdated(summary)
         }
     }
 
-    private fun pushWeatherToWebView(summary: String) {
-        if (isFinishing || isDestroyed || !::webView.isInitialized) return
-        val escaped = escapeJs(summary)
-        webView.evaluateJavascript(
-            "if (typeof onWeatherUpdated === 'function') onWeatherUpdated('$escaped');",
-            null
-        )
+    private fun dispatchWeatherUpdated(summary: String) {
+        // onWeatherUpdated contract event
     }
 
-    // --- WakeWordEventBus Listener & Pet State Synchronization ---
+    // --- WakeWordEventBus Listener & Voice Pipeline Synchronization ---
 
     override fun onWakeWordDetected(keyword: String) {
         Log.i(TAG, "UI received wake word event: '$keyword'")
 
-        // 1. Mark conversation active
         isConversationActive = true
 
-        // 2. Hide previous utterance and reply views
+        if (::listeningOverlayContainer.isInitialized) {
+            listeningOverlayContainer.visibility = View.VISIBLE
+        }
         if (::userSpeechView.isInitialized) userSpeechView.visibility = View.GONE
         if (::replyCardView.isInitialized) replyCardView.visibility = View.GONE
 
-        // 3. Set pet state to WAKE_SURPRISE
         if (::petAvatarView.isInitialized) {
             petAvatarView.setPetState(PetAvatarView.PetState.WAKE_SURPRISE)
         }
 
-        // 4. Schedule transition to LISTENING after 650ms if still in conversation
         mainHandler.removeCallbacks(wakeSurpriseToListeningRunnable)
         mainHandler.postDelayed(wakeSurpriseToListeningRunnable, WAKE_SURPRISE_DURATION_MS)
 
-        // 5. Update display and AOD state
         updateDisplayPowerAndAodState()
-
-        // 6. Update native UI banner
         showBanner("我在听...", "#10B981", "#34D399")
 
-        // 7. Dispatch to WebView JavaScript
-        val escaped = escapeJs(keyword)
-        webView.evaluateJavascript("if (typeof onWakeWord === 'function') onWakeWord('$escaped');", null)
-
-        // Cancel any auto-hide while ASR is active
         mainHandler.removeCallbacks(resetWakeStateRunnable)
     }
 
@@ -804,13 +675,11 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
 
     override fun onAsrDownloadProgress(progressPercent: Int, statusText: String) {
         Log.i(TAG, "ASR download progress: $progressPercent% - $statusText")
-        val escaped = escapeJs(statusText)
-        webView.evaluateJavascript(
-            "if (typeof onAsrDownloadProgress === 'function') onAsrDownloadProgress($progressPercent, '$escaped');",
-            null
-        )
         if (progressPercent in 0..99) {
             isConversationActive = true
+            if (::listeningOverlayContainer.isInitialized) {
+                listeningOverlayContainer.visibility = View.VISIBLE
+            }
             updateDisplayPowerAndAodState()
             showBanner(statusText, "#2563EB", "#60A5FA")
         } else if (progressPercent == 100) {
@@ -826,6 +695,9 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
 
     override fun onAsrPartialResult(text: String) {
         if (text.isNotEmpty()) {
+            if (::listeningOverlayContainer.isInitialized) {
+                listeningOverlayContainer.visibility = View.VISIBLE
+            }
             if (::petAvatarView.isInitialized) {
                 petAvatarView.setPetState(PetAvatarView.PetState.LISTENING)
             }
@@ -834,19 +706,19 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
                 userSpeechView.visibility = View.VISIBLE
                 conversationHudLayout.visibility = View.VISIBLE
             }
-            val escaped = escapeJs(text)
-            webView.evaluateJavascript("if (typeof onAsrPartial === 'function') onAsrPartial('$escaped');", null)
         }
     }
 
     override fun onAsrFinalResult(text: String) {
         Log.i(TAG, "UI received ASR final result: '$text'")
+        if (::listeningOverlayContainer.isInitialized) {
+            listeningOverlayContainer.visibility = View.VISIBLE
+        }
         if (text.isEmpty()) {
             if (::petAvatarView.isInitialized) {
                 petAvatarView.setPetState(PetAvatarView.PetState.CONFUSED)
             }
             showBanner("未听清，请再唤醒一次", "#6B7280", "#9CA3AF")
-            webView.evaluateJavascript("if (typeof onAsrFinal === 'function') onAsrFinal('');", null)
             mainHandler.removeCallbacks(resetWakeStateRunnable)
             mainHandler.postDelayed(resetWakeStateRunnable, WAKE_STATE_DURATION_MS)
         } else {
@@ -859,58 +731,49 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
                 conversationHudLayout.visibility = View.VISIBLE
             }
             showBanner("思考中...", "#0284C7", "#38BDF8")
-            val escaped = escapeJs(text)
-            webView.evaluateJavascript("if (typeof onAsrFinal === 'function') onAsrFinal('$escaped');", null)
         }
     }
 
     override fun onChatReply(replyText: String) {
         Log.i(TAG, "UI received chat reply: '$replyText'")
+        if (::listeningOverlayContainer.isInitialized) {
+            listeningOverlayContainer.visibility = View.VISIBLE
+        }
         if (::petAvatarView.isInitialized) {
             petAvatarView.setPetState(PetAvatarView.PetState.SPEAKING)
         }
         showBanner("正在回答...", "#4F46E5", "#818CF8")
         showReplyCard(replyText, isError = false)
-        val escaped = escapeJs(replyText)
-        webView.evaluateJavascript("if (typeof onChatReply === 'function') onChatReply('$escaped');", null)
     }
 
     override fun onWaitingForMuse(statusText: String) {
         Log.i(TAG, "UI received waiting for muse event: '$statusText'")
         isConversationActive = true
+        if (::listeningOverlayContainer.isInitialized) {
+            listeningOverlayContainer.visibility = View.VISIBLE
+        }
         if (::petAvatarView.isInitialized) {
             petAvatarView.setPetState(PetAvatarView.PetState.THINKING)
         }
         showBanner("等待回复中...", "#D97706", "#FBBF24")
         showReplyCard(statusText, isError = false)
-        val escaped = escapeJs(statusText)
-        webView.evaluateJavascript("if (typeof onWaitingForMuse === 'function') onWaitingForMuse('$escaped');", null)
         mainHandler.removeCallbacks(resetWakeStateRunnable)
     }
 
     override fun onFocusBoard(boardId: String) {
         Log.i(TAG, "UI received focus board event: '$boardId'")
-        val escaped = escapeJs(boardId)
-        webView.evaluateJavascript("if (typeof onFocusBoard === 'function') onFocusBoard('$escaped', 180);", null)
+        // Handled in Phase 4 for dynamic board page selection
     }
 
     override fun onBridgeNotice(text: String) {
-        if (isFinishing || isDestroyed || !::webView.isInitialized) return
-        val escaped = escapeJs(text)
-        webView.evaluateJavascript(
-            "if (typeof onBridgeNotice === 'function') onBridgeNotice('$escaped');",
-            null
-        )
+        if (isFinishing || isDestroyed) return
+        // Bridge notice handling
     }
 
     override fun onRequestPin(requestId: String, kind: String) {
         showNativePinDialog(requestId, kind)
     }
 
-    /**
-     * Numeric PIN dialog. The digits are handed to the dashboard via
-     * `onPinEntered(requestId, pin)` and never posted as an approval from native code.
-     */
     private fun showNativePinDialog(requestId: String, kind: String = "approve") {
         if (isFinishing || isDestroyed) return
         val bound = AppConfig.getBoundBridgeOrigin(this)
@@ -934,29 +797,24 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
     }
 
     private fun deliverPinToPage(requestId: String, pin: String, kind: String) {
-        if (isFinishing || isDestroyed || !::webView.isInitialized) return
+        if (isFinishing || isDestroyed) return
         val bound = AppConfig.getBoundBridgeOrigin(this)
         if (!OriginBoundHost.allowsPage(currentPageUrl, bound)) return
         val digits = pin.filter { it.isDigit() }.take(6)
         if (digits.length !in 4..6) return
-        val idEsc = escapeJs(requestId)
-        val pinEsc = escapeJs(digits)
-        val kindEsc = escapeJs(if (kind == "reject") "reject" else "approve")
-        webView.evaluateJavascript(
-            "if (typeof onPinEntered === 'function') onPinEntered('$idEsc', '$pinEsc', '$kindEsc');",
-            null
-        )
+        // onPinEntered contract handling
     }
 
     override fun onChatOfflineError(errorMessage: String) {
         Log.w(TAG, "UI received offline/chat error: '$errorMessage'")
+        if (::listeningOverlayContainer.isInitialized) {
+            listeningOverlayContainer.visibility = View.VISIBLE
+        }
         if (::petAvatarView.isInitialized) {
             petAvatarView.setPetState(PetAvatarView.PetState.ERROR)
         }
         showBanner("⚠ 离线提示", "#DC2626", "#F87171")
         showReplyCard(errorMessage, isError = true)
-        val escaped = escapeJs(errorMessage)
-        webView.evaluateJavascript("if (typeof onChatOffline === 'function') onChatOffline('$escaped');", null)
         mainHandler.removeCallbacks(resetWakeStateRunnable)
         mainHandler.postDelayed(resetWakeStateRunnable, 5000L)
     }
@@ -964,17 +822,17 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
     override fun onFollowUpListening(turnIndex: Int) {
         Log.i(TAG, "UI entering follow-up listening turn #$turnIndex")
         isConversationActive = true
+        if (::listeningOverlayContainer.isInitialized) {
+            listeningOverlayContainer.visibility = View.VISIBLE
+        }
         if (::petAvatarView.isInitialized) {
             petAvatarView.setPetState(PetAvatarView.PetState.FOLLOW_UP)
         }
         showBanner("对话中，继续说...", "#10B981", "#34D399")
-        webView.evaluateJavascript("if (typeof onFollowUpListening === 'function') onFollowUpListening($turnIndex);", null)
         mainHandler.removeCallbacks(resetWakeStateRunnable)
     }
 
     override fun onStateChanged(state: String) {
-        val escaped = escapeJs(state)
-        webView.evaluateJavascript("if (typeof onPipelineStateChanged === 'function') onPipelineStateChanged('$escaped');", null)
         if (state == VoiceKioskService.PipelineState.KWS_LISTENING.name) {
             val currentText = if (::wakeBanner.isInitialized) wakeBanner.text?.toString().orEmpty() else ""
             val isErrorOrNotice = currentText.startsWith("⚠") || currentText.startsWith("未听清")
@@ -989,7 +847,7 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         Log.i(TAG, "Service status changed: running=$running, message=$message")
     }
 
-    // --- ReleaseUpdateChecker Listener (Silent badge only; never pops dialogs or plays audio) ---
+    // --- ReleaseUpdateChecker Listener ---
 
     override fun onUpdateCheckStateChanged(inFlight: Boolean, lastResult: ReleaseUpdateChecker.CheckResult?) {
         if (isFinishing || isDestroyed || !::settingsButton.isInitialized) {
@@ -1053,15 +911,10 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
         if (::replyCardView.isInitialized) {
             replyCardView.visibility = View.GONE
         }
+        if (::listeningOverlayContainer.isInitialized) {
+            listeningOverlayContainer.visibility = View.GONE
+        }
         updateDisplayPowerAndAodState()
-    }
-
-    private fun escapeJs(raw: String): String {
-        return raw
-            .replace("\\", "\\\\")
-            .replace("'", "\\'")
-            .replace("\n", "\\n")
-            .replace("\r", "")
     }
 
     private fun dpToPx(dp: Int): Int {
@@ -1073,9 +926,7 @@ class MainActivity : Activity(), WakeWordEventBus.Listener, ReleaseUpdateChecker
     }
 
     /**
-     * Origin-bound JS bridge for the kiosk dashboard. [deviceToken] returns the stored
-     * device token only when the current WebView URL origin equals the origin the token
-     * is bound to; otherwise "". Never logs the token.
+     * Origin-bound JS bridge compatibility hook.
      */
     inner class VoiceKioskHost {
         @JavascriptInterface

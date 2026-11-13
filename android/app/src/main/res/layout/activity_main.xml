@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/mainRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/oled_black">
+
+    <!-- Anti-Burn-In Shifting Container: shifts static content smoothly every 60s -->
+    <FrameLayout
+        android:id="@+id/contentShiftContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <!-- Main horizontal navigation pager -->
+        <androidx.viewpager2.widget.ViewPager2
+            android:id="@+id/viewPager"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Bottom Page Indicator (white pill active, grey dots inactive) -->
+        <com.voicekiosk.app.ui.PageIndicatorView
+            android:id="@+id/pageIndicator"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:layout_marginBottom="@dimen/indicator_margin_bottom" />
+
+    </FrameLayout>
+
+    <!-- Top-Right Settings Button -->
+    <TextView
+        android:id="@+id/settingsButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="16dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/bg_settings_button"
+        android:paddingStart="12dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="8dp"
+        android:text="⚙ 设置"
+        android:textColor="@color/text_white"
+        android:textSize="13sp" />
+
+    <!-- Container for Voice Listening Overlay (Phase 6 will populate this) -->
+    <FrameLayout
+        android:id="@+id/listeningOverlayContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
+    <!-- OLED Night Mode dimming overlay -->
+    <View
+        android:id="@+id/nightOverlayView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/oled_black"
+        android:alpha="0.0"
+        android:clickable="false"
+        android:focusable="false"
+        android:visibility="gone" />
+
+</FrameLayout>

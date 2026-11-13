@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- OLED True Black Palette -->
+    <color name="oled_black">#000000</color>
+    <color name="bg_card">#141416</color>
+    <color name="border_card">#27272A</color>
+    <color name="bg_chip">#18181B</color>
+    <color name="border_chip">#27272A</color>
+
+    <!-- Grayscale Text Hierarchy -->
+    <color name="text_primary">#F8FAFC</color>
+    <color name="text_white">#FFFFFF</color>
+    <color name="text_secondary">#94A3B8</color>
+    <color name="text_muted">#64748B</color>
+    <color name="text_subtle">#475569</color>
+
+    <!-- Accent: Cyan / Weather / Listening -->
+    <color name="accent_cyan">#06B6D4</color>
+    <color name="accent_cyan_bright">#22D3EE</color>
+    <color name="accent_cyan_light">#38BDF8</color>
+    <color name="accent_cyan_dark">#0284C7</color>
+
+    <!-- Accent: Purple / Board Headers & Checkmarks -->
+    <color name="accent_purple">#8B5CF6</color>
+    <color name="accent_purple_light">#A855F7</color>
+    <color name="accent_purple_dark">#2E1065</color>
+    <color name="accent_purple_text">#E0E7FF</color>
+
+    <!-- Semantic Status Colors -->
+    <color name="accent_green">#10B981</color>
+    <color name="accent_green_light">#34D399</color>
+    <color name="accent_amber">#F59E0B</color>
+    <color name="accent_amber_light">#FBBF24</color>
+    <color name="accent_red">#DC2626</color>
+    <color name="accent_red_light">#F87171</color>
+
+    <!-- Page Indicator -->
+    <color name="indicator_active">#FFFFFF</color>
+    <color name="indicator_inactive">#475569</color>
+
+    <!-- Overlays -->
+    <color name="overlay_listening">#CC000000</color>
+    <color name="overlay_night">#D9000000</color>
+</resources>

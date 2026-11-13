@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Page Indicator Dimensions (Landscape) -->
+    <dimen name="indicator_margin_bottom">16dp</dimen>
+
+    <!-- Typography (Landscape) -->
+    <dimen name="clock_text_size">96sp</dimen>
+
+    <!-- Cards & Components (Landscape) -->
+    <dimen name="card_padding">14dp</dimen>
+    <dimen name="card_margin_horizontal">12dp</dimen>
+    <dimen name="grid_spacing">12dp</dimen>
+</resources>

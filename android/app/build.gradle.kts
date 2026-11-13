@@ -168,6 +168,7 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.8.0")
     implementation("androidx.appcompat:appcompat:1.5.1")
+    implementation("androidx.viewpager2:viewpager2:1.0.0")
     implementation(files("libs/sherpa-onnx-2.0.1.aar"))
     implementation("com.github.stuxuhai:jpinyin:1.1.8")
 
