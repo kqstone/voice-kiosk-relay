@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/kvCardContainer"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="@dimen/task_card_margin_h"
+    android:layout_marginTop="@dimen/task_card_margin_v"
+    android:layout_marginEnd="@dimen/task_card_margin_h"
+    android:layout_marginBottom="@dimen/task_card_margin_v"
+    android:background="@drawable/bg_task_card"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="@dimen/card_padding">
+
+    <TextView
+        android:id="@+id/tvKey"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium"
+        android:textColor="@color/text_secondary"
+        android:textSize="13sp" />
+
+    <View
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:layout_weight="1" />
+
+    <TextView
+        android:id="@+id/tvValue"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium"
+        android:textColor="@color/text_primary"
+        android:textSize="15sp" />
+
+</LinearLayout>

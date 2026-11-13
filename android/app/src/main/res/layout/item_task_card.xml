@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/cardContainer"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="@dimen/task_card_margin_h"
+    android:layout_marginTop="@dimen/task_card_margin_v"
+    android:layout_marginEnd="@dimen/task_card_margin_h"
+    android:layout_marginBottom="@dimen/task_card_margin_v"
+    android:background="@drawable/bg_task_card"
+    android:clickable="true"
+    android:focusable="true"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="@dimen/card_padding">
+
+    <!-- Left Content: Category row (dot + label) and task text -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical">
+
+        <!-- Category row: Color dot and subject/category label -->
+        <LinearLayout
+            android:id="@+id/categoryRow"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <View
+                android:id="@+id/viewCategoryDot"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/tvCategoryLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp" />
+
+        </LinearLayout>
+
+        <!-- Task Content Text (No estimated-time anywhere) -->
+        <TextView
+            android:id="@+id/tvTaskText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:fontFamily="sans-serif"
+            android:lineSpacingMultiplier="1.25"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/task_text_size" />
+
+    </LinearLayout>
+
+    <!-- Right Side: Circular Checkbox -->
+    <FrameLayout
+        android:id="@+id/checkboxContainer"
+        android:layout_width="32dp"
+        android:layout_height="32dp"
+        android:layout_marginStart="12dp"
+        android:layout_gravity="center_vertical">
+
+        <ImageView
+            android:id="@+id/ivCheckbox"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:layout_gravity="center"
+            android:contentDescription="Checkbox"
+            android:src="@drawable/ic_checkbox_unchecked" />
+
+    </FrameLayout>
+
+</LinearLayout>

@@ -41,8 +41,11 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.viewpager2.widget.ViewPager2
 import com.voicekiosk.app.bridge.OriginBoundHost
+import com.voicekiosk.app.data.BoardModel
+import com.voicekiosk.app.data.BoardRepository
 import com.voicekiosk.app.ui.MainPagerAdapter
 import com.voicekiosk.app.ui.PageIndicatorView
+import android.content.res.Configuration
 import java.util.Calendar
 import java.util.Random
 
@@ -78,6 +81,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     private lateinit var viewPager: ViewPager2
     private lateinit var pageIndicator: PageIndicatorView
     private lateinit var pagerAdapter: MainPagerAdapter
+    private lateinit var boardRepository: BoardRepository
     private lateinit var settingsButton: TextView
     private lateinit var listeningOverlayContainer: FrameLayout
     private lateinit var nightOverlayView: View
@@ -204,8 +208,19 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         return super.dispatchTouchEvent(ev)
     }
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyImmersiveMode()
+        if (::pagerAdapter.isInitialized) {
+            pagerAdapter.notifyDataSetChanged()
+        }
+    }
+
     override fun onDestroy() {
         Log.i(TAG, "MainActivity onDestroy")
+        if (::boardRepository.isInitialized) {
+            boardRepository.stop()
+        }
         AndroidReleaseUpdatePlatform.getManager(this).unregisterListener(this)
         WakeWordEventBus.unregister(this)
         mainHandler.removeCallbacksAndMessages(null)
@@ -225,11 +240,36 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         listeningOverlayContainer = findViewById(R.id.listeningOverlayContainer)
         nightOverlayView = findViewById(R.id.nightOverlayView)
 
-        // 1. Initialize ViewPager2 Navigation Pager Framework (Page 0 Home Screen)
-        pagerAdapter = MainPagerAdapter(pageCount = 3, onWakeInteraction = { onUserInteractionWake() })
+        // 1. Initialize ViewPager2 Navigation Pager Framework (Page 0 Home Screen + Dynamic Boards)
+        boardRepository = BoardRepository(this).apply {
+            setListener(object : BoardRepository.Listener {
+                override fun onBoardsUpdated(boards: List<BoardModel>) {
+                    mainHandler.post {
+                        pagerAdapter.setBoards(boards)
+                        pageIndicator.setPageCount(pagerAdapter.itemCount)
+                    }
+                }
+
+                override fun onBoardUpdated(board: BoardModel) {
+                    mainHandler.post {
+                        pagerAdapter.updateBoard(board)
+                    }
+                }
+            })
+        }
+
+        pagerAdapter = MainPagerAdapter(
+            boards = emptyList(),
+            onWakeInteraction = { onUserInteractionWake() },
+            onItemToggle = { boardId, itemId, completed ->
+                boardRepository.toggleItem(boardId, itemId, completed)
+            }
+        )
         viewPager.adapter = pagerAdapter
         viewPager.offscreenPageLimit = 2
         pageIndicator.setPageCount(pagerAdapter.itemCount)
+
+        boardRepository.start()
 
         viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageScrolled(position: Int, positionOffset: Float, positionOffsetPixels: Int) {
@@ -545,10 +585,13 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             networkCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
                     mainHandler.post {
-                        Log.i(TAG, "Network restored: refreshing weather and requesting meta handshake")
+                        Log.i(TAG, "Network restored: refreshing weather, boards and requesting meta handshake")
                         isOffline = false
                         refreshWeather(force = false)
                         VoiceKioskService.requestMetaHandshake(this@MainActivity)
+                        if (::boardRepository.isInitialized) {
+                            boardRepository.onNetworkAvailable()
+                        }
                     }
                 }
 

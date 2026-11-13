@@ -1,5 +1,6 @@
 package com.voicekiosk.app.ui
 
+import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
@@ -10,63 +11,80 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextClock
 import android.widget.TextView
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.voicekiosk.app.AppConfig
 import com.voicekiosk.app.R
 import com.voicekiosk.app.WeatherInfo
 import com.voicekiosk.app.WeatherManager
+import com.voicekiosk.app.data.BoardComponent
+import com.voicekiosk.app.data.BoardModel
 
 /**
  * Pager adapter for the horizontal navigation container (ViewPager2).
  *
  * Page 0: Home screen (giant clock, Gregorian + weekday + Chinese lunar date, weather capsule, bottom glow arc).
- * Pages 1..N: Placeholder pages for upcoming phases (Music page, dynamic boards).
+ * Pages 1..N: Dynamic board pages fetched from the bridge (Title, Checklist, List, KeyValue).
  *
- * NOTE: Contains zero hardcoded board content and zero estimated-time fields.
+ * NOTE: Contains ZERO hardcoded board content and ZERO estimated-time fields.
  */
 class MainPagerAdapter(
-    private var pageCount: Int = 3,
-    private val onWakeInteraction: (() -> Unit)? = null
+    private var boards: List<BoardModel> = emptyList(),
+    private val onWakeInteraction: (() -> Unit)? = null,
+    private val onItemToggle: ((boardId: String, itemId: String, completed: Boolean) -> Unit)? = null
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
         const val VIEW_TYPE_HOME = 0
-        const val VIEW_TYPE_PLACEHOLDER = 1
+        const val VIEW_TYPE_BOARD = 1
     }
 
-    fun setPageCount(count: Int) {
-        val coerced = count.coerceAtLeast(1)
-        if (pageCount != coerced) {
-            pageCount = coerced
+    fun setBoards(newBoards: List<BoardModel>) {
+        this.boards = newBoards
+        notifyDataSetChanged()
+    }
+
+    fun updateBoard(board: BoardModel) {
+        val index = boards.indexOfFirst { it.boardId == board.boardId }
+        if (index != -1) {
+            val mutable = boards.toMutableList()
+            mutable[index] = board
+            boards = mutable
+            notifyItemChanged(index + 1)
+        } else {
+            val mutable = boards.toMutableList()
+            mutable.add(board)
+            boards = mutable
             notifyDataSetChanged()
         }
     }
 
-    override fun getItemCount(): Int = pageCount
+    override fun getItemCount(): Int = 1 + boards.size
 
     override fun getItemViewType(position: Int): Int {
-        return if (position == 0) VIEW_TYPE_HOME else VIEW_TYPE_PLACEHOLDER
+        return if (position == 0) VIEW_TYPE_HOME else VIEW_TYPE_BOARD
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        val inflater = LayoutInflater.from(parent.context)
         return if (viewType == VIEW_TYPE_HOME) {
-            val view = LayoutInflater.from(parent.context).inflate(R.layout.fragment_home, parent, false)
+            val view = inflater.inflate(R.layout.fragment_home, parent, false)
             HomeViewHolder(view, onWakeInteraction)
         } else {
-            val frame = FrameLayout(parent.context).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-                setBackgroundColor(Color.BLACK)
-            }
-            PlaceholderViewHolder(frame)
+            val view = inflater.inflate(R.layout.fragment_board, parent, false)
+            BoardViewHolder(view, onItemToggle)
         }
     }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         if (holder is HomeViewHolder) {
             holder.bind()
+        } else if (holder is BoardViewHolder) {
+            val boardIndex = position - 1
+            if (boardIndex in boards.indices) {
+                holder.bind(boards[boardIndex])
+            }
         }
     }
 
@@ -84,7 +102,89 @@ class MainPagerAdapter(
         }
     }
 
-    class PlaceholderViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView)
+    class BoardViewHolder(
+        itemView: View,
+        private val onItemToggle: ((boardId: String, itemId: String, completed: Boolean) -> Unit)?
+    ) : RecyclerView.ViewHolder(itemView) {
+        private val tvBoardTitle: TextView = itemView.findViewById(R.id.tvBoardTitle)
+        private val tvBoardTag: TextView = itemView.findViewById(R.id.tvBoardTag)
+        private val tvBoardBadge: TextView = itemView.findViewById(R.id.tvBoardBadge)
+        private val tvBoardSubtitle: TextView = itemView.findViewById(R.id.tvBoardSubtitle)
+        private val rvBoardContent: RecyclerView = itemView.findViewById(R.id.rvBoardContent)
+
+        fun bind(board: BoardModel) {
+            tvBoardTitle.text = board.titleComponent.title
+
+            if (board.titleComponent.tag.isNotEmpty()) {
+                tvBoardTag.text = board.titleComponent.tag
+                tvBoardTag.visibility = View.VISIBLE
+            } else {
+                tvBoardTag.visibility = View.GONE
+            }
+
+            if (board.titleComponent.subtitle.isNotEmpty()) {
+                tvBoardSubtitle.text = board.titleComponent.subtitle
+                tvBoardSubtitle.visibility = View.VISIBLE
+            } else {
+                tvBoardSubtitle.visibility = View.GONE
+            }
+
+            if (board.titleComponent.badge.isNotEmpty()) {
+                tvBoardBadge.text = board.titleComponent.badge
+                tvBoardBadge.visibility = View.VISIBLE
+            } else {
+                tvBoardBadge.visibility = View.GONE
+            }
+
+            // Adaptive layout: 2-column grid in landscape (screenshot 5), single column in portrait (screenshot 2)
+            val isLandscape = itemView.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+            val layoutManager = if (isLandscape) {
+                GridLayoutManager(itemView.context, 2)
+            } else {
+                LinearLayoutManager(itemView.context)
+            }
+            rvBoardContent.layoutManager = layoutManager
+
+            // Flatten board components to display items
+            val displayItems = mutableListOf<BoardItemDisplay>()
+            for (comp in board.components) {
+                when (comp) {
+                    is BoardComponent.Checklist -> {
+                        for (it in comp.items) {
+                            displayItems.add(BoardItemDisplay.Task(it))
+                        }
+                    }
+                    is BoardComponent.ListComp -> {
+                        for (it in comp.items) {
+                            displayItems.add(BoardItemDisplay.PlainText(it))
+                        }
+                    }
+                    is BoardComponent.KeyValue -> {
+                        for (p in comp.pairs) {
+                            displayItems.add(BoardItemDisplay.KeyValue(p))
+                        }
+                    }
+                }
+            }
+
+            var adapter: TaskCardAdapter? = null
+            adapter = TaskCardAdapter(
+                boardId = board.boardId,
+                items = displayItems,
+                onItemToggle = { itemId, completed ->
+                    // Immediate local update of header badge
+                    val total = adapter?.getTaskCount() ?: 0
+                    val compCount = adapter?.getCompletedTaskCount() ?: 0
+                    if (total > 0) {
+                        tvBoardBadge.text = "$compCount / $total 完成"
+                        tvBoardBadge.visibility = View.VISIBLE
+                    }
+                    onItemToggle?.invoke(board.boardId, itemId, completed)
+                }
+            )
+            rvBoardContent.adapter = adapter
+        }
+    }
 
     class HomeViewHolder(
         itemView: View,

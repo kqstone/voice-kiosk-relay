@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/listCardContainer"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginStart="@dimen/task_card_margin_h"
+    android:layout_marginTop="@dimen/task_card_margin_v"
+    android:layout_marginEnd="@dimen/task_card_margin_h"
+    android:layout_marginBottom="@dimen/task_card_margin_v"
+    android:background="@drawable/bg_task_card"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="@dimen/card_padding">
+
+    <View
+        android:layout_width="4dp"
+        android:layout_height="16dp"
+        android:layout_marginEnd="12dp"
+        android:background="@color/accent_purple" />
+
+    <TextView
+        android:id="@+id/tvListText"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:fontFamily="sans-serif"
+        android:lineSpacingMultiplier="1.25"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/task_text_size" />
+
+</LinearLayout>

@@ -26,7 +26,8 @@ env/
 .env
 .env.*
 !.env.example
-data/
+relay-bridge/data/
+/data/
 
 # OS and Editors
 .DS_Store
