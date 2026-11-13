@@ -37,7 +37,7 @@ class ReleaseUpdateCheckerTest {
             tagName: String = "v0.2.0",
             versionName: String = "0.2.0",
             versionCode: Long = 3L,
-            repository: String = "kqstone/voice-kiosk",
+            repository: String = "kqstone/voice-kiosk-relay",
             applicationId: String = "com.voicekiosk.app",
             minSdk: Int = 28,
             targetSdk: Int = 31,
@@ -76,12 +76,12 @@ class ReleaseUpdateCheckerTest {
             tagName: String = "v0.2.0",
             draft: Boolean = false,
             prerelease: Boolean = false,
-            htmlUrl: String = "https://github.com/kqstone/voice-kiosk/releases/tag/$tagName",
+            htmlUrl: String = "https://github.com/kqstone/voice-kiosk-relay/releases/tag/$tagName",
             apkName: String = "voice-kiosk-$tagName-arm64-v8a.apk",
             apkSize: Long = 10_485_760L,
-            apkUrl: String = "https://github.com/kqstone/voice-kiosk/releases/download/$tagName/$apkName",
+            apkUrl: String = "https://github.com/kqstone/voice-kiosk-relay/releases/download/$tagName/$apkName",
             metadataContent: String = buildValidMetadataJson(tagName = tagName, apkName = apkName, apkSize = apkSize),
-            metadataUrl: String = "https://github.com/kqstone/voice-kiosk/releases/download/$tagName/release-metadata.json",
+            metadataUrl: String = "https://github.com/kqstone/voice-kiosk-relay/releases/download/$tagName/release-metadata.json",
             includeApkAsset: Boolean = true,
             includeMetadataAsset: Boolean = true
         ): String {
@@ -262,16 +262,18 @@ class ReleaseUpdateCheckerTest {
             assertEquals("APK_ASSET_SIZE_MISMATCH", e.code)
         }
 
-        // Metadata wrong repository
-        val metaWrongRepo = buildValidMetadataJson(repository = "evil/fork-kiosk")
-        val ghReleaseRepo = ReleaseUpdateChecker.parseAndValidateGitHubReleaseJson(
-            buildValidGitHubReleaseJson(metadataContent = metaWrongRepo)
-        )
-        try {
-            ReleaseUpdateChecker.parseAndCrossValidateMetadata(metaWrongRepo, ghReleaseRepo)
-            fail("Expected wrong repository in metadata to fail")
-        } catch (e: ReleaseUpdateChecker.ValidationException) {
-            assertEquals("REPOSITORY_MISMATCH", e.code)
+        // Metadata wrong repository (arbitrary fork and old repository kqstone/voice-kiosk)
+        for (wrongRepo in listOf("evil/fork-kiosk", "kqstone/voice-kiosk")) {
+            val metaWrongRepo = buildValidMetadataJson(repository = wrongRepo)
+            val ghReleaseRepo = ReleaseUpdateChecker.parseAndValidateGitHubReleaseJson(
+                buildValidGitHubReleaseJson(metadataContent = metaWrongRepo)
+            )
+            try {
+                ReleaseUpdateChecker.parseAndCrossValidateMetadata(metaWrongRepo, ghReleaseRepo)
+                fail("Expected wrong repository in metadata to fail: $wrongRepo")
+            } catch (e: ReleaseUpdateChecker.ValidationException) {
+                assertEquals("REPOSITORY_MISMATCH", e.code)
+            }
         }
     }
 
@@ -334,29 +336,36 @@ class ReleaseUpdateCheckerTest {
         // Valid URLs pass
         ReleaseUpdateChecker.validateOfficialApiUrl(ReleaseUpdateChecker.LATEST_RELEASE_API_URL)
         ReleaseUpdateChecker.validateOfficialReleaseHtmlUrl(
-            "https://github.com/kqstone/voice-kiosk/releases/tag/v0.2.0",
+            "https://github.com/kqstone/voice-kiosk-relay/releases/tag/v0.2.0",
             "v0.2.0"
         )
         ReleaseUpdateChecker.validateOfficialAssetDownloadUrl(
-            "https://github.com/kqstone/voice-kiosk/releases/download/v0.2.0/release-metadata.json",
+            "https://github.com/kqstone/voice-kiosk-relay/releases/download/v0.2.0/release-metadata.json",
             "v0.2.0",
             "release-metadata.json"
         )
+        ReleaseUpdateChecker.validateOfficialAssetDownloadUrl(
+            "https://github.com/kqstone/voice-kiosk-relay/releases/download/v0.2.0/voice-kiosk-v0.2.0-arm64-v8a.apk",
+            "v0.2.0",
+            "voice-kiosk-v0.2.0-arm64-v8a.apk"
+        )
+        ReleaseUpdateChecker.validateOfficialReleasesIndexUrl(ReleaseUpdateChecker.OFFICIAL_RELEASES_HTML_URL)
         ReleaseUpdateChecker.validateMetadataRedirectTargetUrl(
             "https://objects.githubusercontent.com/github-production-release-asset-2e65be/12345?X-Amz-Signature=abc"
         )
 
         // Spoofed URLs must fail
         val spoofedApiUrls = listOf(
-            "http://api.github.com/repos/kqstone/voice-kiosk/releases/latest", // non-HTTPS
-            "https://api.github.com@evil.com/repos/kqstone/voice-kiosk/releases/latest", // userinfo spoofing
-            "https://user:pass@api.github.com/repos/kqstone/voice-kiosk/releases/latest", // credentials
-            "https://api.github.com:8443/repos/kqstone/voice-kiosk/releases/latest", // non-standard port
-            "https://api.github.com/repos/kqstone/voice-kiosk/releases/latest?foo=bar", // query not allowed
-            "https://api.github.com/repos/kqstone/voice-kiosk/releases/latest#frag", // fragment
-            "https://api.github.com/repos/kqstone/voice-kiosk/../other/releases/latest", // dot traversal
-            "https://api.github.com/repos/kqstone%2f..%2fevil/voice-kiosk/releases/latest", // encoded slash/dot
-            "https://api.github.com/repos/kqstone/voice-kiosk/releases/%2e%2e/latest" // encoded ..
+            "http://api.github.com/repos/kqstone/voice-kiosk-relay/releases/latest", // non-HTTPS
+            "https://api.github.com@evil.com/repos/kqstone/voice-kiosk-relay/releases/latest", // userinfo spoofing
+            "https://user:pass@api.github.com/repos/kqstone/voice-kiosk-relay/releases/latest", // credentials
+            "https://api.github.com:8443/repos/kqstone/voice-kiosk-relay/releases/latest", // non-standard port
+            "https://api.github.com/repos/kqstone/voice-kiosk-relay/releases/latest?foo=bar", // query not allowed
+            "https://api.github.com/repos/kqstone/voice-kiosk-relay/releases/latest#frag", // fragment
+            "https://api.github.com/repos/kqstone/voice-kiosk-relay/../other/releases/latest", // dot traversal
+            "https://api.github.com/repos/kqstone%2f..%2fevil/voice-kiosk-relay/releases/latest", // encoded slash/dot
+            "https://api.github.com/repos/kqstone/voice-kiosk-relay/releases/%2e%2e/latest", // encoded ..
+            "https://api.github.com/repos/kqstone/voice-kiosk/releases/latest" // old repository URL
         )
         for (badUrl in spoofedApiUrls) {
             try {
@@ -367,10 +376,53 @@ class ReleaseUpdateCheckerTest {
             }
         }
 
+        // Old repository URLs must fail (latest-release API, release page, asset downloads, and releases index)
+        try {
+            ReleaseUpdateChecker.validateOfficialReleaseHtmlUrl(
+                "https://github.com/kqstone/voice-kiosk/releases/tag/v0.2.0",
+                "v0.2.0"
+            )
+            fail("Should have rejected old repository release HTML URL")
+        } catch (_: ReleaseUpdateChecker.ValidationException) {
+            // Expected
+        }
+
+        try {
+            ReleaseUpdateChecker.validateOfficialAssetDownloadUrl(
+                "https://github.com/kqstone/voice-kiosk/releases/download/v0.2.0/voice-kiosk-v0.2.0-arm64-v8a.apk",
+                "v0.2.0",
+                "voice-kiosk-v0.2.0-arm64-v8a.apk"
+            )
+            fail("Should have rejected old repository APK download URL")
+        } catch (_: ReleaseUpdateChecker.ValidationException) {
+            // Expected
+        }
+
+        try {
+            ReleaseUpdateChecker.validateOfficialAssetDownloadUrl(
+                "https://github.com/kqstone/voice-kiosk/releases/download/v0.2.0/release-metadata.json",
+                "v0.2.0",
+                "release-metadata.json"
+            )
+            fail("Should have rejected old repository metadata download URL")
+        } catch (_: ReleaseUpdateChecker.ValidationException) {
+            // Expected
+        }
+
+        try {
+            ReleaseUpdateChecker.validateOfficialReleasesIndexUrl(
+                "https://github.com/kqstone/voice-kiosk/releases"
+            )
+            fail("Should have rejected old repository releases index URL")
+        } catch (_: ReleaseUpdateChecker.ValidationException) {
+            // Expected
+        }
+
         // Untrusted redirect targets must fail
         val badRedirects = listOf(
             "https://evil.example.com/release-metadata.json",
             "https://raw.githubusercontent.com/kqstone/voice-kiosk/main/release-metadata.json",
+            "https://github.com/kqstone/voice-kiosk/releases/download/v0.2.0/release-metadata.json",
             "https://github.com/other-owner/other-repo/releases/download/v0.2.0/release-metadata.json",
             "http://objects.githubusercontent.com/asset",
             "https://objects.githubusercontent.com@attacker.com/asset"
@@ -990,16 +1042,16 @@ class ReleaseUpdateCheckerTest {
     fun testUiLifecycleRegistrationAndStrictBrowserUrlValidationContract() {
         // A. Strict browser navigation validator accepts exact official URLs matching validated tag/asset
         assertEquals(
-            "https://github.com/kqstone/voice-kiosk/releases/tag/v0.2.0",
+            "https://github.com/kqstone/voice-kiosk-relay/releases/tag/v0.2.0",
             ReleaseUpdateChecker.validateOfficialBrowserNavigationUrl(
-                "https://github.com/kqstone/voice-kiosk/releases/tag/v0.2.0",
+                "https://github.com/kqstone/voice-kiosk-relay/releases/tag/v0.2.0",
                 ReleaseUpdateChecker.OfficialBrowserTarget.ReleaseHtmlPage(expectedTag = "v0.2.0")
             )
         )
         assertEquals(
-            "https://github.com/kqstone/voice-kiosk/releases/download/v0.2.0/voice-kiosk-v0.2.0-arm64-v8a.apk",
+            "https://github.com/kqstone/voice-kiosk-relay/releases/download/v0.2.0/voice-kiosk-v0.2.0-arm64-v8a.apk",
             ReleaseUpdateChecker.validateOfficialBrowserNavigationUrl(
-                "https://github.com/kqstone/voice-kiosk/releases/download/v0.2.0/voice-kiosk-v0.2.0-arm64-v8a.apk",
+                "https://github.com/kqstone/voice-kiosk-relay/releases/download/v0.2.0/voice-kiosk-v0.2.0-arm64-v8a.apk",
                 ReleaseUpdateChecker.OfficialBrowserTarget.ReleaseApkAsset(
                     expectedTag = "v0.2.0",
                     expectedAssetName = "voice-kiosk-v0.2.0-arm64-v8a.apk"
@@ -1007,37 +1059,44 @@ class ReleaseUpdateCheckerTest {
             )
         )
         assertEquals(
-            "https://github.com/kqstone/voice-kiosk/releases",
+            "https://github.com/kqstone/voice-kiosk-relay/releases",
             ReleaseUpdateChecker.validateOfficialBrowserNavigationUrl(
                 ReleaseUpdateChecker.OFFICIAL_RELEASES_HTML_URL,
                 ReleaseUpdateChecker.OfficialBrowserTarget.ReleasesIndexPage
             )
         )
 
-        // B. Rejects URLs that would have bypassed a naive startsWith("/kqstone/voice-kiosk/releases") check
+        // B. Rejects URLs that would have bypassed a naive startsWith("/kqstone/voice-kiosk-relay/releases") check
         val rejectedBrowserNavigations = listOf<Pair<String, ReleaseUpdateChecker.OfficialBrowserTarget>>(
+            // Old repository URLs must be rejected by browser navigation validator
+            "https://github.com/kqstone/voice-kiosk/releases/tag/v0.2.0" to
+                ReleaseUpdateChecker.OfficialBrowserTarget.ReleaseHtmlPage("v0.2.0"),
+            "https://github.com/kqstone/voice-kiosk/releases/download/v0.2.0/voice-kiosk-v0.2.0-arm64-v8a.apk" to
+                ReleaseUpdateChecker.OfficialBrowserTarget.ReleaseApkAsset("v0.2.0", "voice-kiosk-v0.2.0-arm64-v8a.apk"),
+            "https://github.com/kqstone/voice-kiosk/releases" to
+                ReleaseUpdateChecker.OfficialBrowserTarget.ReleasesIndexPage,
             // Wrong tag vs validated release
-            "https://github.com/kqstone/voice-kiosk/releases/tag/v0.1.9" to
+            "https://github.com/kqstone/voice-kiosk-relay/releases/tag/v0.1.9" to
                 ReleaseUpdateChecker.OfficialBrowserTarget.ReleaseHtmlPage("v0.2.0"),
             // Malicious query parameter on release page
-            "https://github.com/kqstone/voice-kiosk/releases/tag/v0.2.0?redirect=https://evil.example" to
+            "https://github.com/kqstone/voice-kiosk-relay/releases/tag/v0.2.0?redirect=https://evil.example" to
                 ReleaseUpdateChecker.OfficialBrowserTarget.ReleaseHtmlPage("v0.2.0"),
             // Malicious userinfo with github.com host
-            "https://attacker:secret@github.com/kqstone/voice-kiosk/releases/tag/v0.2.0" to
+            "https://attacker:secret@github.com/kqstone/voice-kiosk-relay/releases/tag/v0.2.0" to
                 ReleaseUpdateChecker.OfficialBrowserTarget.ReleaseHtmlPage("v0.2.0"),
-            // Path prefix spoofing: /kqstone/voice-kiosk/releases-evil
-            "https://github.com/kqstone/voice-kiosk/releases-evil/tag/v0.2.0" to
+            // Path prefix spoofing: /kqstone/voice-kiosk-relay/releases-evil
+            "https://github.com/kqstone/voice-kiosk-relay/releases-evil/tag/v0.2.0" to
                 ReleaseUpdateChecker.OfficialBrowserTarget.ReleaseHtmlPage("v0.2.0"),
             // Wrong asset filename or tag mismatch on APK download URL
-            "https://github.com/kqstone/voice-kiosk/releases/download/v0.2.0/evil.apk" to
+            "https://github.com/kqstone/voice-kiosk-relay/releases/download/v0.2.0/evil.apk" to
                 ReleaseUpdateChecker.OfficialBrowserTarget.ReleaseApkAsset("v0.2.0", "voice-kiosk-v0.2.0-arm64-v8a.apk"),
-            "https://github.com/kqstone/voice-kiosk/releases/download/v0.1.0/voice-kiosk-v0.2.0-arm64-v8a.apk" to
+            "https://github.com/kqstone/voice-kiosk-relay/releases/download/v0.1.0/voice-kiosk-v0.2.0-arm64-v8a.apk" to
                 ReleaseUpdateChecker.OfficialBrowserTarget.ReleaseApkAsset("v0.2.0", "voice-kiosk-v0.2.0-arm64-v8a.apk"),
             // Encoded path traversal under /releases
-            "https://github.com/kqstone/voice-kiosk/releases/download/v0.2.0/..%2f..%2fevil.apk" to
+            "https://github.com/kqstone/voice-kiosk-relay/releases/download/v0.2.0/..%2f..%2fevil.apk" to
                 ReleaseUpdateChecker.OfficialBrowserTarget.ReleaseApkAsset("v0.2.0", "voice-kiosk-v0.2.0-arm64-v8a.apk"),
             // Trailing path or query on releases index page
-            "https://github.com/kqstone/voice-kiosk/releases?page=2" to
+            "https://github.com/kqstone/voice-kiosk-relay/releases?page=2" to
                 ReleaseUpdateChecker.OfficialBrowserTarget.ReleasesIndexPage
         )
         for ((badUrl, target) in rejectedBrowserNavigations) {

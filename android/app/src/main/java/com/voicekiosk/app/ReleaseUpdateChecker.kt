@@ -22,10 +22,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Pure JVM-testable GitHub public release update checker for Voice Kiosk.
  *
  * Security & Consistency Guarantees:
- * 1. Pinned exclusively to official repository `kqstone/voice-kiosk`:
- *    - API endpoint: `https://api.github.com/repos/kqstone/voice-kiosk/releases/latest`
- *    - Browser release page prefix: `https://github.com/kqstone/voice-kiosk/releases/`
- *    - Official APK/metadata asset prefix: `https://github.com/kqstone/voice-kiosk/releases/download/<tag>/<asset>`
+ * 1. Pinned exclusively to official repository `kqstone/voice-kiosk-relay`:
+ *    - API endpoint: `https://api.github.com/repos/kqstone/voice-kiosk-relay/releases/latest`
+ *    - Browser release page prefix: `https://github.com/kqstone/voice-kiosk-relay/releases/`
+ *    - Official APK/metadata asset prefix: `https://github.com/kqstone/voice-kiosk-relay/releases/download/<tag>/<asset>`
  *    - Controlled redirect domains for metadata download: only official GitHub release asset CDN domains
  *      (`objects.githubusercontent.com`, `release-assets.githubusercontent.com`, `github-releases.githubusercontent.com`).
  * 2. Strict URL validation:
@@ -55,14 +55,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 object ReleaseUpdateChecker {
 
-    const val EXPECTED_REPOSITORY = "kqstone/voice-kiosk"
+    const val EXPECTED_REPOSITORY = "kqstone/voice-kiosk-relay"
     const val EXPECTED_APPLICATION_ID = "com.voicekiosk.app"
     const val EXPECTED_ABI = "arm64-v8a"
     const val EXPECTED_SCHEMA_VERSION = 1
 
     const val METADATA_ASSET_NAME = "release-metadata.json"
-    const val LATEST_RELEASE_API_URL = "https://api.github.com/repos/kqstone/voice-kiosk/releases/latest"
-    const val OFFICIAL_RELEASES_HTML_URL = "https://github.com/kqstone/voice-kiosk/releases"
+    const val LATEST_RELEASE_API_URL = "https://api.github.com/repos/kqstone/voice-kiosk-relay/releases/latest"
+    const val OFFICIAL_RELEASES_HTML_URL = "https://github.com/kqstone/voice-kiosk-relay/releases"
 
     const val MAX_API_RESPONSE_BYTES = 512 * 1024 // 512 KB
     const val MAX_METADATA_RESPONSE_BYTES = 128 * 1024 // 128 KB
@@ -372,7 +372,7 @@ object ReleaseUpdateChecker {
     }
 
     /**
-     * Strict official GitHub Releases index URL validator (`https://github.com/kqstone/voice-kiosk/releases`),
+     * Strict official GitHub Releases index URL validator (`https://github.com/kqstone/voice-kiosk-relay/releases`),
      * used when no formal release has been published yet (HTTP 404).
      */
     fun validateOfficialReleasesIndexUrl(urlStr: String): String {
