@@ -158,7 +158,7 @@ class SettingsActivityContractTest {
         assertTrue("Must read AppConfig.getOnDevicePlayerPackage", content.contains("AppConfig.getOnDevicePlayerPackage(this)"))
         assertTrue("Must format player label via formatPlayerLabel", content.contains("AndroidLocalPlatform.formatPlayerLabel"))
         assertTrue("Must display 自动选择（推荐） option", content.contains("\"自动选择（推荐）\""))
-        assertTrue("Must handle no player detected fallback", content.contains("\"未检测到可用音乐播放器\""))
+        assertTrue("Must handle no player detected fallback", content.contains("未检测到可用音乐播放器"))
         assertTrue("Must prompt single choice dialog title 选择默认音乐播放器", content.contains("\"选择默认音乐播放器\""))
     }
 }

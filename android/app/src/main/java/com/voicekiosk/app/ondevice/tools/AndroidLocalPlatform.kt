@@ -273,7 +273,19 @@ class AndroidLocalPlatform(
             val result = mutableListOf<Pair<String, String>>()
             val seen = mutableSetOf<String>()
 
-            val allCandidates = scanner.queryActivityPlayers() + scanner.queryServicePlayers()
+            val activityCandidates = try {
+                scanner.queryActivityPlayers()
+            } catch (e: Exception) {
+                Log.w(TAG, "activity player scan failed: ${e.message}")
+                emptyList()
+            }
+            val serviceCandidates = try {
+                scanner.queryServicePlayers()
+            } catch (e: Exception) {
+                Log.w(TAG, "service player scan failed: ${e.message}")
+                emptyList()
+            }
+            val allCandidates = activityCandidates + serviceCandidates
             for (candidate in allCandidates) {
                 val pkg = candidate.packageName.trim()
                 if (pkg.isEmpty() || pkg == ownPackageName || !seen.add(pkg)) {

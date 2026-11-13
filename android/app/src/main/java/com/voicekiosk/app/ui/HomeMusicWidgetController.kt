@@ -35,8 +35,6 @@ class AndroidHomeMusicWidgetView(rootView: View) : HomeMusicWidgetView {
     val tvTrackArtist: TextView? = widgetView.findViewById(R.id.tvTrackArtist)
     val progressBar: ProgressBar? = widgetView.findViewById(R.id.progressBar)
     val tvTimeProgress: TextView? = widgetView.findViewById(R.id.tvTimeProgress)
-    val tvTimeElapsed: TextView? = widgetView.findViewById(R.id.tvTimeElapsed)
-    val tvTimeDuration: TextView? = widgetView.findViewById(R.id.tvTimeDuration)
     val btnPrev: View? = widgetView.findViewById(R.id.btnPrev)
     val btnPlayPause: ImageView? = widgetView.findViewById(R.id.btnPlayPause)
     val btnNext: View? = widgetView.findViewById(R.id.btnNext)
@@ -79,8 +77,6 @@ class AndroidHomeMusicWidgetView(rootView: View) : HomeMusicWidgetView {
         val durationStr = if (durationMs > 0) HomeMusicWidgetController.formatTime(durationMs) else "--:--"
 
         tvTimeProgress?.text = "$elapsedStr / $durationStr"
-        tvTimeElapsed?.text = elapsedStr
-        tvTimeDuration?.text = durationStr
 
         progressBar?.let { pb ->
             if (durationMs > 0) {

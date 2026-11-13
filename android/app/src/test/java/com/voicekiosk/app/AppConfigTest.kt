@@ -2,12 +2,12 @@ package com.voicekiosk.app
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.test.mock.MockContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
-import java.lang.reflect.Proxy
 import java.nio.charset.StandardCharsets
 
 class AppConfigTest {
@@ -72,10 +72,10 @@ class AppConfigTest {
         val prefs = FakeSharedPreferences()
         try {
             AppConfig.prefsOverride = prefs
-            val dummyContext = Proxy.newProxyInstance(
-                Context::class.java.classLoader,
-                arrayOf(Context::class.java)
-            ) { _, _, _ -> null } as Context
+            // Context is an abstract class, so it cannot be faked with a dynamic
+            // proxy (Proxy only works on interfaces). MockContext is never touched:
+            // prefs() short-circuits on prefsOverride above.
+            val dummyContext: Context = MockContext()
 
             AppConfig.setOnDevicePlayerPackage(dummyContext, "com.kugou.android")
             assertEquals("com.kugou.android", AppConfig.getOnDevicePlayerPackage(dummyContext))
