@@ -89,6 +89,21 @@ class MainPagerAdapter(
 
     fun getActiveHomeViewHolder(): HomeViewHolder? = activeHomeViewHolder
 
+    fun onConfigurationChanged(newConfig: Configuration? = null) {
+        activeHomeViewHolder?.reinflate(newConfig)
+        try {
+            notifyDataSetChanged()
+        } catch (_: Throwable) {}
+    }
+
+    fun reinflateHome(newConfig: Configuration? = null) {
+        activeHomeViewHolder?.reinflate(newConfig)
+    }
+
+    fun getBoards(): List<BoardModel> = boards
+
+    fun getMusicState(): MusicState? = musicState
+
     fun setBoards(newBoards: List<BoardModel>) {
         this.boards = newBoards
         try {
@@ -128,8 +143,13 @@ class MainPagerAdapter(
         val inflater = LayoutInflater.from(parent.context)
         return when (viewType) {
             VIEW_TYPE_HOME -> {
-                val view = inflater.inflate(R.layout.fragment_home, parent, false)
-                HomeViewHolder(view, onWakeInteraction, onMediaControl, onOpenNotificationSettings)
+                val container = FrameLayout(parent.context).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                }
+                HomeViewHolder(container, onWakeInteraction, onMediaControl, onOpenNotificationSettings)
             }
             else -> {
                 val view = inflater.inflate(R.layout.fragment_board, parent, false)
@@ -286,75 +306,174 @@ class MainPagerAdapter(
         private val onOpenNotificationSettings: (() -> Unit)? = null
     ) : RecyclerView.ViewHolder(itemView), WeatherManager.WeatherListener {
 
-        private val tvDateLine: TextView? = itemView.findViewById(R.id.tvDateLine)
-        private val textClock: TextClock? = itemView.findViewById(R.id.textClock)
-        private val weatherCapsule: LinearLayout? = itemView.findViewById(R.id.weatherCapsule)
-        private val tvWeatherIcon: TextView? = itemView.findViewById(R.id.tvWeatherIcon)
-        private val tvWeatherTemp: TextView? = itemView.findViewById(R.id.tvWeatherTemp)
-        private val tvWeatherDesc: TextView? = itemView.findViewById(R.id.tvWeatherDesc)
-        private val tvSlideHint: TextView? = itemView.findViewById(R.id.tvSlideHint)
-        private val tvWakePrompt: TextView? = itemView.findViewById(R.id.tvWakePrompt)
+        private var tvDateLine: TextView? = null
+        private var textClock: TextClock? = null
+        private var weatherCapsule: LinearLayout? = null
+        private var tvWeatherIcon: TextView? = null
+        private var tvWeatherTemp: TextView? = null
+        private var tvWeatherDesc: TextView? = null
+        private var tvSlideHint: TextView? = null
+        private var tvWakePrompt: TextView? = null
 
-        val musicWidgetController: HomeMusicWidgetController? = try {
-            val widgetView: View? = itemView.findViewById(R.id.layoutNowPlaying)
-            if (widgetView != null) {
-                HomeMusicWidgetController(widgetView, onMediaControl, onOpenNotificationSettings)
-            } else {
-                null
-            }
-        } catch (_: Throwable) {
-            null
-        }
+        var musicWidgetController: HomeMusicWidgetController? = null
+            private set
+
+        private var currentMusicState: MusicState? = null
+        private var isMusicVisible: Boolean = false
+        private var isAttachedToWindow: Boolean = false
+        private var inflatedOrientation: Int = Configuration.ORIENTATION_UNDEFINED
 
         private val mainHandler = Handler(Looper.getMainLooper())
         private val dateRefreshRunnable = object : Runnable {
             override fun run() {
                 updateDateLine()
-                mainHandler.postDelayed(this, 60 * 1000L)
+                try {
+                    mainHandler.postDelayed(this, 60 * 1000L)
+                } catch (_: Throwable) {}
+            }
+        }
+
+        init {
+            val container = itemView as? ViewGroup
+            if (container != null && container.childCount == 0) {
+                inflateLayout()
+            } else {
+                bindViews(itemView)
+                try {
+                    inflatedOrientation = itemView.resources?.configuration?.orientation
+                        ?: Configuration.ORIENTATION_UNDEFINED
+                } catch (_: Throwable) {
+                    inflatedOrientation = Configuration.ORIENTATION_UNDEFINED
+                }
+            }
+        }
+
+        private fun inflateLayout() {
+            val container = itemView as? ViewGroup ?: return
+            try {
+                val inflater = LayoutInflater.from(container.context)
+                val contentView = inflater.inflate(R.layout.fragment_home, container, false)
+                container.addView(contentView)
+                bindViews(contentView)
+                inflatedOrientation = container.resources?.configuration?.orientation
+                    ?: Configuration.ORIENTATION_UNDEFINED
+            } catch (_: Throwable) {
+                bindViews(container)
+            }
+        }
+
+        private fun bindViews(root: View) {
+            tvDateLine = root.findViewById(R.id.tvDateLine)
+            textClock = root.findViewById(R.id.textClock)
+            weatherCapsule = root.findViewById(R.id.weatherCapsule)
+            tvWeatherIcon = root.findViewById(R.id.tvWeatherIcon)
+            tvWeatherTemp = root.findViewById(R.id.tvWeatherTemp)
+            tvWeatherDesc = root.findViewById(R.id.tvWeatherDesc)
+            tvSlideHint = root.findViewById(R.id.tvSlideHint)
+            tvWakePrompt = root.findViewById(R.id.tvWakePrompt)
+
+            val widgetView: View? = root.findViewById(R.id.layoutNowPlaying)
+            musicWidgetController = if (widgetView != null) {
+                try {
+                    HomeMusicWidgetController(widgetView, onMediaControl, onOpenNotificationSettings)
+                } catch (_: Throwable) {
+                    null
+                }
+            } else {
+                null
+            }
+        }
+
+        fun reinflate(newConfig: Configuration? = null) {
+            val container = itemView as? ViewGroup ?: return
+            musicWidgetController?.onDetached()
+            container.removeAllViews()
+
+            try {
+                val inflater = LayoutInflater.from(container.context)
+                val contentView = inflater.inflate(R.layout.fragment_home, container, false)
+                container.addView(contentView)
+                bindViews(contentView)
+                inflatedOrientation = newConfig?.orientation
+                    ?: container.resources?.configuration?.orientation
+                    ?: Configuration.ORIENTATION_UNDEFINED
+            } catch (_: Throwable) {
+                bindViews(container)
+            }
+
+            // Rebind state with new views
+            bind(currentMusicState, isMusicVisible)
+
+            if (isAttachedToWindow) {
+                musicWidgetController?.onAttached()
             }
         }
 
         fun bind(musicState: MusicState? = null, isMusicVisible: Boolean = false) {
+            if (musicState != null) {
+                currentMusicState = musicState
+            }
+            this.isMusicVisible = isMusicVisible
+
+            val currentOrientation = try {
+                itemView.resources?.configuration?.orientation ?: Configuration.ORIENTATION_UNDEFINED
+            } catch (_: Throwable) {
+                Configuration.ORIENTATION_UNDEFINED
+            }
+
+            if (inflatedOrientation != Configuration.ORIENTATION_UNDEFINED &&
+                currentOrientation != Configuration.ORIENTATION_UNDEFINED &&
+                inflatedOrientation != currentOrientation
+            ) {
+                reinflate()
+                return
+            }
+
             updateDateLine()
 
             val context = itemView.context
-            val wakeWord = AppConfig.getWakeWord(context)
+            val wakeWord = try { AppConfig.getWakeWord(context) } catch (_: Throwable) { "小智" }
             tvWakePrompt?.text = "说 \"$wakeWord\" 或点击唤醒语音助手"
             tvWakePrompt?.setOnClickListener {
                 onWakeInteraction?.invoke()
             }
 
             weatherCapsule?.setOnClickListener {
-                WeatherManager.fetchWeatherIfNeeded(context, force = true) { _ ->
-                    WeatherManager.getCachedWeatherInfo(context)?.let { info ->
-                        bindWeatherInfo(info)
+                try {
+                    WeatherManager.fetchWeatherIfNeeded(context, force = true) { _ ->
+                        WeatherManager.getCachedWeatherInfo(context)?.let { info ->
+                            bindWeatherInfo(info)
+                        }
                     }
-                }
+                } catch (_: Throwable) {}
             }
 
-            val cached = WeatherManager.getCachedWeatherInfo(context)
-            if (cached != null) {
-                bindWeatherInfo(cached)
-            } else {
-                val summary = AppConfig.getCachedWeatherSummary(context)
-                if (summary.isNotEmpty()) {
-                    val parsed = WeatherManager.parseCachedSummary(summary)
-                    if (parsed != null) {
-                        bindWeatherInfo(parsed)
+            try {
+                val cached = WeatherManager.getCachedWeatherInfo(context)
+                if (cached != null) {
+                    bindWeatherInfo(cached)
+                } else {
+                    val summary = AppConfig.getCachedWeatherSummary(context)
+                    if (summary.isNotEmpty()) {
+                        val parsed = WeatherManager.parseCachedSummary(summary)
+                        if (parsed != null) {
+                            bindWeatherInfo(parsed)
+                        } else {
+                            tvWeatherIcon?.text = "⛅"
+                            tvWeatherTemp?.text = "--°"
+                            tvWeatherDesc?.text = summary
+                        }
                     } else {
                         tvWeatherIcon?.text = "⛅"
                         tvWeatherTemp?.text = "--°"
-                        tvWeatherDesc?.text = summary
+                        tvWeatherDesc?.text = "正在获取天气..."
                     }
-                } else {
-                    tvWeatherIcon?.text = "⛅"
-                    tvWeatherTemp?.text = "--°"
-                    tvWeatherDesc?.text = "正在获取天气..."
                 }
-            }
+            } catch (_: Throwable) {}
 
-            if (musicState != null) {
-                musicWidgetController?.bind(musicState)
+            val stateToBind = musicState ?: currentMusicState
+            if (stateToBind != null) {
+                musicWidgetController?.bind(stateToBind)
                 musicWidgetController?.setVisible(isMusicVisible, animate = false)
             } else {
                 musicWidgetController?.setVisible(false, animate = false)
@@ -362,6 +481,8 @@ class MainPagerAdapter(
         }
 
         fun updateMusicState(state: MusicState) {
+            currentMusicState = state
+            isMusicVisible = state.isPlaying
             musicWidgetController?.bind(state)
             if (state.isPlaying) {
                 musicWidgetController?.setVisible(true, animate = true)
@@ -372,25 +493,37 @@ class MainPagerAdapter(
 
         fun setMusicVisibility(visible: Boolean, state: MusicState? = null) {
             if (state != null) {
+                currentMusicState = state
+            }
+            isMusicVisible = visible
+            if (state != null) {
                 musicWidgetController?.bind(state)
             }
             musicWidgetController?.setVisible(visible, animate = true)
         }
 
         fun onAttached() {
+            isAttachedToWindow = true
             updateDateLine()
-            mainHandler.removeCallbacks(dateRefreshRunnable)
-            mainHandler.postDelayed(dateRefreshRunnable, 60 * 1000L)
-            WeatherManager.addListener(this)
-            val context = itemView.context
-            WeatherManager.getCachedWeatherInfo(context)?.let { bindWeatherInfo(it) }
+            try {
+                mainHandler.removeCallbacks(dateRefreshRunnable)
+                mainHandler.postDelayed(dateRefreshRunnable, 60 * 1000L)
+            } catch (_: Throwable) {}
+            try {
+                WeatherManager.addListener(this)
+                val context = itemView.context
+                WeatherManager.getCachedWeatherInfo(context)?.let { bindWeatherInfo(it) }
+            } catch (_: Throwable) {}
             musicWidgetController?.onAttached()
         }
 
         fun onDetached() {
+            isAttachedToWindow = false
             musicWidgetController?.onDetached()
-            WeatherManager.removeListener(this)
-            mainHandler.removeCallbacks(dateRefreshRunnable)
+            try {
+                WeatherManager.removeListener(this)
+                mainHandler.removeCallbacks(dateRefreshRunnable)
+            } catch (_: Throwable) {}
         }
 
         override fun onWeatherUpdated(info: WeatherInfo) {
@@ -398,7 +531,9 @@ class MainPagerAdapter(
         }
 
         private fun updateDateLine() {
-            tvDateLine?.text = LunarCalendarHelper.formatFullDateLine()
+            try {
+                tvDateLine?.text = LunarCalendarHelper.formatFullDateLine()
+            } catch (_: Throwable) {}
         }
 
         fun bindWeatherInfo(info: WeatherInfo) {
@@ -411,5 +546,16 @@ class MainPagerAdapter(
             }
             tvWeatherDesc?.text = desc
         }
+
+        fun isLandscapeLayout(): Boolean {
+            return itemView.findViewById<View>(R.id.layoutHomeContent) != null ||
+                inflatedOrientation == Configuration.ORIENTATION_LANDSCAPE
+        }
+
+        fun getInflatedOrientation(): Int = inflatedOrientation
+
+        fun getDateLine(): TextView? = tvDateLine
+        fun getTextClock(): TextClock? = textClock
+        fun getWeatherCapsule(): LinearLayout? = weatherCapsule
     }
 }

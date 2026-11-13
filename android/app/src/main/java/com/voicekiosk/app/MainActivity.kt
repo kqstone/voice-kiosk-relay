@@ -207,8 +207,19 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         applyImmersiveMode()
+        if (::pageIndicator.isInitialized) {
+            val lp = pageIndicator.layoutParams as? FrameLayout.LayoutParams
+            if (lp != null) {
+                lp.bottomMargin = resources.getDimensionPixelSize(R.dimen.indicator_margin_bottom)
+                pageIndicator.layoutParams = lp
+            }
+        }
         if (::pagerAdapter.isInitialized) {
-            pagerAdapter.notifyDataSetChanged()
+            val currentPage = if (::viewPager.isInitialized) viewPager.currentItem else 0
+            pagerAdapter.onConfigurationChanged(newConfig)
+            if (::viewPager.isInitialized && viewPager.currentItem != currentPage) {
+                viewPager.setCurrentItem(currentPage, false)
+            }
         }
     }
 
