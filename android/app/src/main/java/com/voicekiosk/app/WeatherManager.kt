@@ -46,6 +46,80 @@ object WeatherManager {
     const val CACHE_COOLDOWN_MS = 30 * 60 * 1000L
     const val HTTP_TIMEOUT_MS = 6000
 
+    interface WeatherListener {
+        fun onWeatherUpdated(info: WeatherInfo)
+    }
+
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<WeatherListener>()
+
+    @Volatile
+    private var cachedWeatherInfo: WeatherInfo? = null
+
+    fun getCachedWeatherInfo(context: Context? = null): WeatherInfo? {
+        cachedWeatherInfo?.let { return it }
+        if (context != null) {
+            val cachedStr = AppConfig.getCachedWeatherSummary(context)
+            if (cachedStr.isNotEmpty()) {
+                val parsed = parseCachedSummary(cachedStr)
+                if (parsed != null) {
+                    cachedWeatherInfo = parsed
+                    return parsed
+                }
+            }
+        }
+        return null
+    }
+
+    fun addListener(listener: WeatherListener) {
+        listeners.add(listener)
+        cachedWeatherInfo?.let { info ->
+            dispatchMain { listener.onWeatherUpdated(info) }
+        }
+    }
+
+    fun removeListener(listener: WeatherListener) {
+        listeners.remove(listener)
+    }
+
+    fun parseCachedSummary(summary: String): WeatherInfo? {
+        if (summary.isBlank()) return null
+        return try {
+            val parts = summary.split("·")
+            if (parts.size < 2) return null
+            val city = parts[0].trim()
+            val rest = parts[1].trim()
+            val tokens = rest.split(" ").filter { it.isNotBlank() }
+            val icon = if (tokens.isNotEmpty()) tokens[0].trim() else "⛅"
+            val condition = if (tokens.size > 1) tokens[1].trim() else "多云"
+            val tempToken = tokens.find { it.contains("°") }
+            val temp = tempToken?.replace("°C", "")?.replace("°", "")?.trim()?.toIntOrNull() ?: 20
+
+            var minTemp: Int? = null
+            var maxTemp: Int? = null
+            if (summary.contains("(") && summary.contains(")")) {
+                val rangeStr = summary.substringAfter("(").substringBefore(")")
+                val rangeTokens = rangeStr.split("~")
+                if (rangeTokens.size == 2) {
+                    minTemp = rangeTokens[0].replace("°C", "").replace("°", "").trim().toIntOrNull()
+                    maxTemp = rangeTokens[1].replace("°C", "").replace("°", "").trim().toIntOrNull()
+                }
+            }
+
+            WeatherInfo(
+                city = city,
+                temperatureC = temp,
+                minTempC = minTemp,
+                maxTempC = maxTemp,
+                weatherCode = 1,
+                conditionZh = condition,
+                iconSymbol = icon,
+                updatedAtMs = 0L
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     val PRESET_CITIES: List<CityLocation> = listOf(
         CityLocation("上海", 31.2304f, 121.4737f, "上海"),
         CityLocation("北京", 39.9042f, 116.4074f, "北京"),
@@ -186,6 +260,13 @@ object WeatherManager {
         val lastFetch = AppConfig.getLastWeatherFetchMs(context)
         val now = System.currentTimeMillis()
         if (!force && cached.isNotEmpty() && (now - lastFetch) < CACHE_COOLDOWN_MS) {
+            val cachedInfo = cachedWeatherInfo ?: parseCachedSummary(cached)
+            if (cachedInfo != null) {
+                cachedWeatherInfo = cachedInfo
+                for (listener in listeners) {
+                    dispatchMain { listener.onWeatherUpdated(cachedInfo) }
+                }
+            }
             dispatchMain { onResult(cached) }
             return
         }
@@ -213,9 +294,13 @@ object WeatherManager {
                         val fetchNow = System.currentTimeMillis()
                         val info = parseForecastJson(city, body, fetchNow)
                         if (info != null) {
+                            cachedWeatherInfo = info
                             val displayLine = info.formatDisplayLine()
                             AppConfig.setCachedWeatherSummary(context, displayLine)
                             AppConfig.setLastWeatherFetchMs(context, fetchNow)
+                            for (listener in listeners) {
+                                dispatchMain { listener.onWeatherUpdated(info) }
+                            }
                             dispatchMain { onResult(displayLine) }
                             return@execute
                         }

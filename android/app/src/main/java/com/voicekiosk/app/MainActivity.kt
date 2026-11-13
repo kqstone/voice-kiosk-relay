@@ -225,8 +225,8 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         listeningOverlayContainer = findViewById(R.id.listeningOverlayContainer)
         nightOverlayView = findViewById(R.id.nightOverlayView)
 
-        // 1. Initialize ViewPager2 Navigation Pager Framework
-        pagerAdapter = MainPagerAdapter(pageCount = 3)
+        // 1. Initialize ViewPager2 Navigation Pager Framework (Page 0 Home Screen)
+        pagerAdapter = MainPagerAdapter(pageCount = 3, onWakeInteraction = { onUserInteractionWake() })
         viewPager.adapter = pagerAdapter
         viewPager.offscreenPageLimit = 2
         pageIndicator.setPageCount(pagerAdapter.itemCount)

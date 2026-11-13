@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/oled_black">
+
+    <!-- Atmospheric bottom glow arc (Screenshot 1) -->
+    <com.voicekiosk.app.ui.AssistantGlowView
+        android:id="@+id/viewBottomGlow"
+        android:layout_width="match_parent"
+        android:layout_height="110dp"
+        android:layout_gravity="bottom"
+        android:clickable="false"
+        android:focusable="false" />
+
+    <!-- Main Content Container (Portrait: Date on top, giant clock 76sp, weather capsule) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingStart="24dp"
+        android:paddingTop="56dp"
+        android:paddingEnd="24dp">
+
+        <!-- Top Date Line: Gregorian + Weekday + Chinese Lunar (e.g. 11月12日 星期四 · 农历十月初三) -->
+        <TextView
+            android:id="@+id/tvDateLine"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif"
+            android:gravity="center"
+            android:textColor="@color/text_secondary"
+            android:textSize="@dimen/date_text_size" />
+
+        <!-- Giant Centered Clock: 76sp, Roboto Light/Sans-serif-light, White -->
+        <TextClock
+            android:id="@+id/textClock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:fontFamily="sans-serif-light"
+            android:format12Hour="HH:mm"
+            android:format24Hour="HH:mm"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:textColor="@color/text_white"
+            android:textSize="@dimen/clock_text_size" />
+
+        <!-- Weather Capsule: Rounded dark capsule (#141416, border #27272A) -->
+        <LinearLayout
+            android:id="@+id/weatherCapsule"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_weather_capsule"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="16dp"
+            android:paddingBottom="8dp">
+
+            <TextView
+                android:id="@+id/tvWeatherIcon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:textColor="@color/accent_amber"
+                android:textSize="18sp" />
+
+            <TextView
+                android:id="@+id/tvWeatherTemp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:fontFamily="sans-serif-medium"
+                android:textColor="@color/text_white"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/tvWeatherDesc"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Bottom Guides Container: Slide Hint + Wake Prompt (positioned above page indicator) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="48dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
+
+        <!-- Slide hint: 向左滑动查看信息看板 › -->
+        <TextView
+            android:id="@+id/tvSlideHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:text="向左滑动查看信息看板 ›"
+            android:textColor="@color/text_muted"
+            android:textSize="13sp" />
+
+        <!-- Wake Prompt: 说 "你好小智" 或点击唤醒语音助手 -->
+        <TextView
+            android:id="@+id/tvWakePrompt"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:padding="4dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+
+    </LinearLayout>
+
+</FrameLayout>

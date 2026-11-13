@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/oled_black">
+
+    <!-- Atmospheric bottom glow arc (Landscape wide - Screenshot 4) -->
+    <com.voicekiosk.app.ui.AssistantGlowView
+        android:id="@+id/viewBottomGlow"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:layout_gravity="bottom"
+        android:clickable="false"
+        android:focusable="false" />
+
+    <!-- Centered Content Container (Landscape: Centered horizontally and vertically) -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
+
+        <!-- Top Date Line: Gregorian + Weekday + Chinese Lunar -->
+        <TextView
+            android:id="@+id/tvDateLine"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="sans-serif"
+            android:gravity="center"
+            android:textColor="@color/text_secondary"
+            android:textSize="15sp" />
+
+        <!-- Super Large Centered Clock: 96sp+ (via values-land/dimens.xml) -->
+        <TextClock
+            android:id="@+id/textClock"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:fontFamily="sans-serif-light"
+            android:format12Hour="HH:mm"
+            android:format24Hour="HH:mm"
+            android:gravity="center"
+            android:includeFontPadding="false"
+            android:textColor="@color/text_white"
+            android:textSize="@dimen/clock_text_size" />
+
+        <!-- Weather Capsule -->
+        <LinearLayout
+            android:id="@+id/weatherCapsule"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/bg_weather_capsule"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="20dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="20dp"
+            android:paddingBottom="8dp">
+
+            <TextView
+                android:id="@+id/tvWeatherIcon"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:textColor="@color/accent_amber"
+                android:textSize="18sp" />
+
+            <TextView
+                android:id="@+id/tvWeatherTemp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:fontFamily="sans-serif-medium"
+                android:textColor="@color/text_white"
+                android:textSize="16sp" />
+
+            <TextView
+                android:id="@+id/tvWeatherDesc"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Bottom Guides Container: Slide Hint (Landscape has indicator at 16dp from bottom) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:layout_marginBottom="32dp"
+        android:gravity="center_horizontal"
+        android:orientation="vertical">
+
+        <!-- Slide hint: 向左滑动查看信息看板 › -->
+        <TextView
+            android:id="@+id/tvSlideHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="向左滑动查看信息看板 ›"
+            android:textColor="@color/text_muted"
+            android:textSize="12sp" />
+
+        <!-- Wake Prompt (Included for ID consistency across orientations) -->
+        <TextView
+            android:id="@+id/tvWakePrompt"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:visibility="gone" />
+
+    </LinearLayout>
+
+</FrameLayout>
