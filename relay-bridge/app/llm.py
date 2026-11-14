@@ -1,6 +1,7 @@
 from typing import Any
 import httpx
 from app.config import settings
+from app.search import search_client as default_search_client
 from app.storage import BoardStorage
 
 
@@ -16,11 +17,13 @@ class BridgeLLMClient:
         api_key: str | None = None,
         model: str | None = None,
         timeout: float = 30.0,
+        search_client: Any = None,
     ) -> None:
-        self.base_url = (base_url or settings.llm_base_url or "http://100.68.168.204:8317").rstrip("/")
+        self.base_url = (base_url or settings.llm_base_url).rstrip("/")
         self.api_key = api_key if api_key is not None else settings.llm_api_key
-        self.model = model or settings.llm_model or "gemini-3.5-flash-lite"
+        self.model = model or settings.llm_model
         self.timeout = timeout
+        self.search_client = search_client if search_client is not None else default_search_client
 
     @property
     def endpoint_url(self) -> str:
@@ -39,13 +42,37 @@ class BridgeLLMClient:
         if not self.api_key:
             raise BridgeLLMError("LLM API key is not configured")
 
+        user_query = ""
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                user_query = m.get("content", "")
+                break
+
+        # Check if search should be triggered
+        search_block = None
+        if self.search_client and user_query:
+            try:
+                search_block = await self.search_client.search_for_chat(user_query)
+            except Exception:
+                search_block = None
+
+        payload_messages = [dict(m) for m in messages]
+        if search_block:
+            system_idx = next((i for i, m in enumerate(payload_messages) if m.get("role") == "system"), None)
+            if system_idx is not None:
+                cur_content = payload_messages[system_idx].get("content", "")
+                if search_block not in cur_content:
+                    payload_messages[system_idx]["content"] = f"{cur_content}\n\n{search_block}".strip()
+            else:
+                payload_messages.insert(0, {"role": "system", "content": search_block})
+
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
         }
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": messages,
+            "messages": payload_messages,
             "temperature": temperature,
         }
 
@@ -138,8 +165,8 @@ def format_board_summary(storage: BoardStorage) -> str:
     return "\n\n".join(summaries)
 
 
-def build_chat_system_prompt(boards_summary: str) -> str:
-    return (
+def build_chat_system_prompt(boards_summary: str, search_summary: str | None = None) -> str:
+    prompt = (
         "你是家庭智能语音助手 Voice Kiosk。\n"
         "你的任务是为家庭成员提供自然、亲切、简洁、准确的回答。\n"
         "回答内容将直接通过语音合成（TTS）朗读给用户，因此请使用口语化、简洁的中文，不要使用 markdown 标记或复杂列表符号。\n\n"
@@ -149,6 +176,9 @@ def build_chat_system_prompt(boards_summary: str) -> str:
         "1. 如果用户询问看板相关信息（例如今日安排、最新通知等看板内容），请务必根据上述看板内容准确回答。\n"
         "2. 如果用户进行日常问候或常识问答，请简明扼要地回答。"
     )
+    if search_summary:
+        prompt = f"{prompt}\n\n{search_summary}"
+    return prompt
 
 
 llm_client = BridgeLLMClient()

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import shutil
 import tempfile
@@ -5,6 +6,10 @@ import unittest
 from unittest.mock import AsyncMock, patch
 import httpx
 from fastapi.testclient import TestClient
+
+os.environ.setdefault("LLM_BASE_URL", "http://test-llm.example.local")
+os.environ.setdefault("LLM_MODEL", "test-chat-model")
+os.environ.setdefault("LLM_API_KEY", "test-llm-key")
 
 from app.config import settings
 from app.llm import (
@@ -20,14 +25,14 @@ from app.storage import BoardStorage, board_storage
 
 class TestLLMClient(unittest.IsolatedAsyncioTestCase):
     def test_endpoint_url_construction(self) -> None:
-        client1 = BridgeLLMClient(base_url="http://example.com:8317")
-        self.assertEqual(client1.endpoint_url, "http://example.com:8317/v1/chat/completions")
+        client1 = BridgeLLMClient(base_url="http://example.com:9000")
+        self.assertEqual(client1.endpoint_url, "http://example.com:9000/v1/chat/completions")
 
-        client2 = BridgeLLMClient(base_url="http://example.com:8317/")
-        self.assertEqual(client2.endpoint_url, "http://example.com:8317/v1/chat/completions")
+        client2 = BridgeLLMClient(base_url="http://example.com:9000/")
+        self.assertEqual(client2.endpoint_url, "http://example.com:9000/v1/chat/completions")
 
-        client3 = BridgeLLMClient(base_url="http://example.com:8317/v1")
-        self.assertEqual(client3.endpoint_url, "http://example.com:8317/v1/chat/completions")
+        client3 = BridgeLLMClient(base_url="http://example.com:9000/v1")
+        self.assertEqual(client3.endpoint_url, "http://example.com:9000/v1/chat/completions")
 
     async def test_chat_without_api_key(self) -> None:
         client = BridgeLLMClient(base_url="http://example.com", api_key="")
@@ -64,7 +69,7 @@ class TestLLMClient(unittest.IsolatedAsyncioTestCase):
             mock_post.assert_called_once()
             call_args, call_kwargs = mock_post.call_args
             self.assertEqual(call_args[0], "http://example.com/v1/chat/completions")
-            self.assertEqual(call_kwargs["json"]["model"], "gemini-3.5-flash-lite")
+            self.assertEqual(call_kwargs["json"]["model"], settings.llm_model)
             self.assertEqual(call_kwargs["json"]["temperature"], 0.7)
             self.assertEqual(
                 call_kwargs["headers"]["Authorization"],
