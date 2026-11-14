@@ -1,11 +1,16 @@
 package com.voicekiosk.app.ui
 
+import android.graphics.Bitmap
+import android.net.Uri
 import com.voicekiosk.app.media.MediaControlAction
 import com.voicekiosk.app.media.MusicState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 
@@ -278,6 +283,152 @@ class HomeMusicWidgetControllerTest {
     }
 
     // =========================================================================
+    // 5b. Cover Art & Active Session Binding Tests
+    // =========================================================================
+
+    @Test
+    fun testBind_withBitmapAlbumArt_bindsCoverBitmapAndNotPlaceholder() {
+        val dummyBitmap = createDummyBitmap()
+        val stateWithBitmap = MusicState(
+            isPlaying = true,
+            title = "夜曲",
+            artist = "周杰伦",
+            albumArt = dummyBitmap
+        )
+
+        controller.bind(stateWithBitmap)
+
+        assertSame(dummyBitmap, fakeView.lastCoverBitmap)
+        assertNull(fakeView.lastCoverUri)
+        assertFalse("Placeholder must not be shown when bitmap is present", fakeView.hasPlaceholderCover)
+    }
+
+    @Test
+    fun testBind_withAlbumArtUri_bindsCoverUriAndNotPlaceholder() {
+        val dummyUri = createDummyUri()
+        val stateWithUri = MusicState(
+            isPlaying = true,
+            title = "七里香",
+            artist = "周杰伦",
+            albumArt = null,
+            albumArtUri = dummyUri
+        )
+
+        controller.bind(stateWithUri)
+
+        assertNull(fakeView.lastCoverBitmap)
+        assertSame(dummyUri, fakeView.lastCoverUri)
+        assertFalse("Placeholder must not be shown when uri is present", fakeView.hasPlaceholderCover)
+    }
+
+    @Test
+    fun testBind_withBothBitmapAndUri_passesBoth() {
+        val dummyBitmap = createDummyBitmap()
+        val dummyUri = createDummyUri()
+        val stateWithBoth = MusicState(
+            isPlaying = true,
+            title = "晴天",
+            artist = "周杰伦",
+            albumArt = dummyBitmap,
+            albumArtUri = dummyUri
+        )
+
+        controller.bind(stateWithBoth)
+
+        assertSame(dummyBitmap, fakeView.lastCoverBitmap)
+        assertSame(dummyUri, fakeView.lastCoverUri)
+        assertFalse(fakeView.hasPlaceholderCover)
+    }
+
+    @Test
+    fun testBind_withoutAlbumArtOrUri_bindsPlaceholder() {
+        val stateWithoutCover = MusicState(
+            isPlaying = true,
+            title = "枫",
+            artist = "周杰伦",
+            albumArt = null,
+            albumArtUri = null
+        )
+
+        controller.bind(stateWithoutCover)
+
+        assertNull(fakeView.lastCoverBitmap)
+        assertNull(fakeView.lastCoverUri)
+        assertTrue("Placeholder must be shown when neither bitmap nor uri is present", fakeView.hasPlaceholderCover)
+    }
+
+    @Test
+    fun testBind_activeSessionWhenPaused_bindsCorrectlyWithoutClearingCardContent() {
+        val dummyBitmap = createDummyBitmap()
+        val pausedActiveState = MusicState(
+            hasActiveSession = true,
+            isPlaying = false,
+            title = "夜曲",
+            artist = "周杰伦",
+            appName = "QQ音乐",
+            positionMs = 45000L,
+            durationMs = 210000L,
+            albumArt = dummyBitmap
+        )
+
+        controller.bind(pausedActiveState)
+
+        // Metadata must be intact (not cleared just because playback is paused)
+        assertEquals("夜曲", fakeView.lastTitle)
+        assertEquals("周杰伦 · QQ音乐", fakeView.lastArtistAndSource)
+        assertSame(dummyBitmap, fakeView.lastCoverBitmap)
+        assertFalse(fakeView.hasPlaceholderCover)
+        assertEquals(45000L, fakeView.currentProgressMs)
+        assertEquals(210000L, fakeView.durationProgressMs)
+
+        // Play/Pause icon shows play state (indicating user can tap to resume)
+        assertFalse("Play/Pause icon should indicate paused state", fakeView.isPlayingIcon)
+
+        // Card should be visible because active session exists with title
+        assertTrue("Card should be marked visible for active paused session", controller.shouldBeVisible(pausedActiveState))
+
+        // Progress ticker must be cancelled when paused
+        assertEquals(0, fakeScheduler.delayedTasks.size)
+    }
+
+    @Test
+    fun testShouldBeVisible_governedByActiveSessionAndTitle() {
+        // No session: hidden
+        assertFalse(controller.shouldBeVisible(MusicState(hasActiveSession = false, isPlaying = false, title = "")))
+        assertFalse(controller.shouldBeVisible(MusicState(hasActiveSession = false, isPlaying = false, title = "晴天")))
+
+        // Active session with title: visible even when paused
+        assertTrue(controller.shouldBeVisible(MusicState(hasActiveSession = true, isPlaying = false, title = "晴天")))
+
+        // Active session while playing: visible
+        assertTrue(controller.shouldBeVisible(MusicState(hasActiveSession = true, isPlaying = true, title = "晴天")))
+        assertTrue(controller.shouldBeVisible(MusicState(hasActiveSession = true, isPlaying = true, title = "")))
+
+        // Active session with blank title and not playing: hidden
+        assertFalse(controller.shouldBeVisible(MusicState(hasActiveSession = true, isPlaying = false, title = "")))
+    }
+
+    @Test
+    fun testStrictCompliance_noEqualizerOrAnimationCodeInWidget() {
+        // Prohibit EqualizerBarsView
+        try {
+            Class.forName("com.voicekiosk.app.ui.EqualizerBarsView")
+            fail("EqualizerBarsView class must NOT exist in the repository")
+        } catch (_: ClassNotFoundException) {
+            // Expected
+        }
+
+        // Prohibit ValueAnimator / ObjectAnimator in HomeMusicWidgetController
+        val controllerFields = HomeMusicWidgetController::class.java.declaredFields
+        for (field in controllerFields) {
+            assertFalse(
+                "HomeMusicWidgetController must not contain animator fields: ${field.name}",
+                field.type.name.contains("Animator")
+            )
+        }
+    }
+
+    // =========================================================================
     // 6. Button Debounce & Media Control Routing
     // =========================================================================
 
@@ -390,6 +541,24 @@ class HomeMusicWidgetControllerTest {
         assertEquals(1000L, fakeScheduler.delayedTasks.last().second)
     }
 
+    private fun createDummyBitmap(): Bitmap {
+        val unsafeClass = Class.forName("sun.misc.Unsafe")
+        val theUnsafeField = unsafeClass.getDeclaredField("theUnsafe")
+        theUnsafeField.isAccessible = true
+        val unsafeInstance = theUnsafeField.get(null)
+        val allocateInstanceMethod = unsafeClass.getMethod("allocateInstance", Class::class.java)
+        return allocateInstanceMethod.invoke(unsafeInstance, Bitmap::class.java) as Bitmap
+    }
+
+    private fun createDummyUri(): Uri {
+        val unsafeClass = Class.forName("sun.misc.Unsafe")
+        val theUnsafeField = unsafeClass.getDeclaredField("theUnsafe")
+        theUnsafeField.isAccessible = true
+        val unsafeInstance = theUnsafeField.get(null)
+        val allocateInstanceMethod = unsafeClass.getMethod("allocateInstance", Class::class.java)
+        return allocateInstanceMethod.invoke(unsafeInstance, android.net.TestUri::class.java) as Uri
+    }
+
     // =========================================================================
     // Test Doubles (Fakes)
     // =========================================================================
@@ -403,6 +572,9 @@ class HomeMusicWidgetControllerTest {
         var durationProgressMs: Long = 0L
         var isPlayingProgress: Boolean = false
         var isPlayingIcon: Boolean = false
+        var lastCoverBitmap: Bitmap? = null
+        var lastCoverUri: Uri? = null
+        var hasPlaceholderCover: Boolean = false
 
         val mediaControlListeners = mutableMapOf<MediaControlAction, () -> Unit>()
         var openNotificationSettingsListener: (() -> Unit)? = null
@@ -430,6 +602,12 @@ class HomeMusicWidgetControllerTest {
 
         override fun setPlayPauseIcon(isPlaying: Boolean) {
             this.isPlayingIcon = isPlaying
+        }
+
+        override fun setCoverArt(bitmap: Bitmap?, uri: Uri?) {
+            this.lastCoverBitmap = bitmap
+            this.lastCoverUri = uri
+            this.hasPlaceholderCover = (bitmap == null && uri == null)
         }
 
         override fun setOnMediaControl(action: MediaControlAction, listener: () -> Unit) {

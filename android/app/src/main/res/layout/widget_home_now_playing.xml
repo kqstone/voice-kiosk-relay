@@ -12,12 +12,24 @@
     android:paddingEnd="16dp"
     android:paddingBottom="12dp">
 
-    <!-- Top Row: Track & Artist Info (Left) + Media Control Buttons (Right) -->
+    <!-- Top Row: Cover Art + Track & Artist Info + Media Control Buttons -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
         android:orientation="horizontal">
+
+        <!-- Cover Art: 64x64dp (portrait) / 80x80dp (landscape), 10dp rounded corners -->
+        <ImageView
+            android:id="@+id/ivCoverArt"
+            android:layout_width="@dimen/music_cover_size"
+            android:layout_height="@dimen/music_cover_size"
+            android:layout_marginEnd="12dp"
+            android:background="@drawable/bg_music_cover"
+            android:clipToOutline="true"
+            android:contentDescription="Album Art"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_music_placeholder" />
 
         <!-- Track Info Container -->
         <LinearLayout
@@ -57,7 +69,7 @@
 
         </LinearLayout>
 
-        <!-- Media Control Buttons: Previous, Play/Pause, Next -->
+        <!-- Media Control Buttons: Previous, Play/Pause, Next (44dp touch targets) -->
         <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
@@ -66,8 +78,8 @@
 
             <ImageView
                 android:id="@+id/btnPrev"
-                android:layout_width="34dp"
-                android:layout_height="34dp"
+                android:layout_width="@dimen/music_btn_size"
+                android:layout_height="@dimen/music_btn_size"
                 android:background="@drawable/bg_music_control_circle"
                 android:clickable="true"
                 android:contentDescription="Previous"
@@ -77,8 +89,8 @@
 
             <ImageView
                 android:id="@+id/btnPlayPause"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
+                android:layout_width="@dimen/music_btn_size"
+                android:layout_height="@dimen/music_btn_size"
                 android:layout_marginStart="8dp"
                 android:layout_marginEnd="8dp"
                 android:background="@drawable/bg_music_play_circle"
@@ -90,8 +102,8 @@
 
             <ImageView
                 android:id="@+id/btnNext"
-                android:layout_width="34dp"
-                android:layout_height="34dp"
+                android:layout_width="@dimen/music_btn_size"
+                android:layout_height="@dimen/music_btn_size"
                 android:background="@drawable/bg_music_control_circle"
                 android:clickable="true"
                 android:contentDescription="Next"

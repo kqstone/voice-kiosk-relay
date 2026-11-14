@@ -197,6 +197,7 @@ class HomeLayoutTest {
         val widgetIds = extractAllAndroidIds(doc)
 
         // Core required widget controls
+        assertTrue("Widget must contain ivCoverArt", widgetIds.contains("ivCoverArt"))
         assertTrue("Widget must contain tvTrackTitle", widgetIds.contains("tvTrackTitle"))
         assertTrue("Widget must contain tvTrackArtist", widgetIds.contains("tvTrackArtist"))
         assertTrue("Widget must contain btnPrev", widgetIds.contains("btnPrev"))
@@ -204,6 +205,27 @@ class HomeLayoutTest {
         assertTrue("Widget must contain btnNext", widgetIds.contains("btnNext"))
         assertTrue("Widget must contain progressBar", widgetIds.contains("progressBar"))
         assertTrue("Widget must contain tvTimeProgress", widgetIds.contains("tvTimeProgress"))
+
+        val coverArtElement = findElementByAndroidId(doc, "ivCoverArt")
+        assertNotNull("ivCoverArt must be found", coverArtElement)
+        assertEquals("@dimen/music_cover_size", getAttribute(coverArtElement!!, "layout_width"))
+        assertEquals("@dimen/music_cover_size", getAttribute(coverArtElement, "layout_height"))
+        assertEquals("true", getAttribute(coverArtElement, "clipToOutline"))
+
+        val btnPrev = findElementByAndroidId(doc, "btnPrev")!!
+        val btnPlayPause = findElementByAndroidId(doc, "btnPlayPause")!!
+        val btnNext = findElementByAndroidId(doc, "btnNext")!!
+        assertEquals("@dimen/music_btn_size", getAttribute(btnPrev, "layout_width"))
+        assertEquals("@dimen/music_btn_size", getAttribute(btnPrev, "layout_height"))
+        assertEquals("@dimen/music_btn_size", getAttribute(btnPlayPause, "layout_width"))
+        assertEquals("@dimen/music_btn_size", getAttribute(btnPlayPause, "layout_height"))
+        assertEquals("@dimen/music_btn_size", getAttribute(btnNext, "layout_width"))
+        assertEquals("@dimen/music_btn_size", getAttribute(btnNext, "layout_height"))
+
+        // Strict prohibition: no equalizer bars or vinyl disc views
+        assertFalse("EqualizerBarsView must not exist", widgetIds.contains("equalizerBars"))
+        assertFalse("Vinyl view must not exist", widgetIds.contains("vinylView"))
+        assertFalse("Vinyl disc must not exist", widgetIds.contains("ivVinylDisc"))
 
         // Verify that separate elapsed/duration text views are absent in this compact layout,
         // confirming that HomeMusicWidgetController's nullable lookups (tvTimeElapsed, tvTimeDuration)

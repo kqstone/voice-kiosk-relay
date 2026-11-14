@@ -54,6 +54,8 @@ data class WeatherInfo(
     val aqiLevelZh: String? = null,
     val forecastDays: List<DayForecastItem> = emptyList()
 ) {
+    val iconRes: Int get() = WeatherManager.weatherCodeToDrawableRes(weatherCode)
+
     fun formatDisplayLine(): String {
         return if (minTempC != null && maxTempC != null) {
             "$city · $iconSymbol $conditionZh ${temperatureC}°C (${minTempC}°~${maxTempC}°C)"
@@ -212,6 +214,20 @@ object WeatherManager {
             71, 73, 75, 77, 85, 86 -> "雪" to "❄"
             95, 96, 99 -> "雷阵雨" to "⛈"
             else -> "多云" to "⛅"
+        }
+    }
+
+    fun weatherCodeToDrawableRes(code: Int): Int {
+        return when (code) {
+            0 -> R.drawable.ic_weather_sunny
+            1, 2 -> R.drawable.ic_weather_cloudy
+            3 -> R.drawable.ic_weather_overcast
+            45, 48 -> R.drawable.ic_weather_fog
+            51, 53, 55, 56, 57 -> R.drawable.ic_weather_drizzle
+            61, 63, 80, 81, 65, 66, 67, 82 -> R.drawable.ic_weather_rain
+            71, 73, 75, 77, 85, 86 -> R.drawable.ic_weather_snow
+            95, 96, 99 -> R.drawable.ic_weather_thunder
+            else -> R.drawable.ic_weather_cloudy
         }
     }
 

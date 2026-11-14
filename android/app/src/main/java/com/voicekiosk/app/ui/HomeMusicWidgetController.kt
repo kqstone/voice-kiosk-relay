@@ -1,9 +1,13 @@
 package com.voicekiosk.app.ui
 
+import android.graphics.Bitmap
+import android.graphics.Outline
+import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
@@ -22,6 +26,7 @@ interface HomeMusicWidgetView {
     fun setArtistAndSource(text: String)
     fun setProgress(currentMs: Long, durationMs: Long, isPlaying: Boolean)
     fun setPlayPauseIcon(isPlaying: Boolean)
+    fun setCoverArt(bitmap: Bitmap?, uri: Uri?)
     fun setOnMediaControl(action: MediaControlAction, listener: () -> Unit)
     fun setOnOpenNotificationSettings(listener: () -> Unit)
 }
@@ -31,6 +36,7 @@ interface HomeMusicWidgetView {
  */
 class AndroidHomeMusicWidgetView(rootView: View) : HomeMusicWidgetView {
     val widgetView: View = rootView.findViewById(R.id.layoutNowPlaying) ?: rootView
+    val ivCoverArt: ImageView? = widgetView.findViewById(R.id.ivCoverArt)
     val tvTrackTitle: TextView? = widgetView.findViewById(R.id.tvTrackTitle)
     val tvTrackArtist: TextView? = widgetView.findViewById(R.id.tvTrackArtist)
     val progressBar: ProgressBar? = widgetView.findViewById(R.id.progressBar)
@@ -38,6 +44,18 @@ class AndroidHomeMusicWidgetView(rootView: View) : HomeMusicWidgetView {
     val btnPrev: View? = widgetView.findViewById(R.id.btnPrev)
     val btnPlayPause: ImageView? = widgetView.findViewById(R.id.btnPlayPause)
     val btnNext: View? = widgetView.findViewById(R.id.btnNext)
+
+    init {
+        ivCoverArt?.apply {
+            clipToOutline = true
+            outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    val radius = view.resources.getDimension(R.dimen.music_cover_corner_radius)
+                    outline.setRoundRect(0, 0, view.width, view.height, radius)
+                }
+            }
+        }
+    }
 
     override fun setVisible(visible: Boolean, animate: Boolean) {
         if (visible) {
@@ -94,6 +112,34 @@ class AndroidHomeMusicWidgetView(rootView: View) : HomeMusicWidgetView {
         btnPlayPause?.setImageResource(
             if (isPlaying) R.drawable.ic_music_pause else R.drawable.ic_music_play
         )
+    }
+
+    override fun setCoverArt(bitmap: Bitmap?, uri: Uri?) {
+        ivCoverArt?.let { iv ->
+            when {
+                bitmap != null -> {
+                    iv.scaleType = ImageView.ScaleType.CENTER_CROP
+                    iv.setImageBitmap(bitmap)
+                }
+                uri != null -> {
+                    try {
+                        iv.scaleType = ImageView.ScaleType.CENTER_CROP
+                        iv.setImageURI(uri)
+                        if (iv.drawable == null) {
+                            iv.scaleType = ImageView.ScaleType.CENTER_INSIDE
+                            iv.setImageResource(R.drawable.ic_music_placeholder)
+                        }
+                    } catch (_: Throwable) {
+                        iv.scaleType = ImageView.ScaleType.CENTER_INSIDE
+                        iv.setImageResource(R.drawable.ic_music_placeholder)
+                    }
+                }
+                else -> {
+                    iv.scaleType = ImageView.ScaleType.CENTER_INSIDE
+                    iv.setImageResource(R.drawable.ic_music_placeholder)
+                }
+            }
+        }
     }
 
     override fun setOnMediaControl(action: MediaControlAction, listener: () -> Unit) {
@@ -243,11 +289,14 @@ class HomeMusicWidgetController(
     fun bind(state: MusicState) {
         currentState = state
 
+        // Cover Art: priority albumArt, secondary albumArtUri, fallback placeholder
+        widgetView.setCoverArt(state.albumArt, state.albumArtUri)
+
         // Format Title & Artist
         widgetView.setTitle(formatTrackTitle(state))
         widgetView.setArtistAndSource(formatArtistAndSource(state))
 
-        // Play/Pause icon
+        // Play/Pause icon (static resource toggle)
         widgetView.setPlayPauseIcon(state.isPlaying)
 
         // Progress
@@ -267,6 +316,16 @@ class HomeMusicWidgetController(
         } else {
             tickerScheduler.removeCallbacks(progressRunnable)
         }
+    }
+
+    /**
+     * Determines whether the music card should be visible based on active session and content.
+     * Card visibility is driven by [MusicState.hasActiveSession] (with non-blank title or active playback).
+     * Card remains visible when playback is paused as long as the session is active.
+     */
+    fun shouldBeVisible(state: MusicState? = currentState): Boolean {
+        val s = state ?: return false
+        return s.hasActiveSession && (s.title.isNotBlank() || s.isPlaying)
     }
 
     fun updateProgress() {

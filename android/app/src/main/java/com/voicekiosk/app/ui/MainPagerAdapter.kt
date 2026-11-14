@@ -459,12 +459,22 @@ class MainPagerAdapter(
                         if (parsed != null) {
                             bindWeatherInfo(parsed)
                         } else {
-                            tvWeatherIcon?.text = "⛅"
+                            try {
+                                tvWeatherIcon?.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_weather_cloudy, 0, 0, 0)
+                                tvWeatherIcon?.text = ""
+                            } catch (_: Throwable) {
+                                tvWeatherIcon?.text = "⛅"
+                            }
                             tvWeatherTemp?.text = "--°"
                             tvWeatherDesc?.text = summary
                         }
                     } else {
-                        tvWeatherIcon?.text = "⛅"
+                        try {
+                            tvWeatherIcon?.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_weather_cloudy, 0, 0, 0)
+                            tvWeatherIcon?.text = ""
+                        } catch (_: Throwable) {
+                            tvWeatherIcon?.text = "⛅"
+                        }
                         tvWeatherTemp?.text = "--°"
                         tvWeatherDesc?.text = "正在获取天气..."
                     }
@@ -537,14 +547,29 @@ class MainPagerAdapter(
         }
 
         fun bindWeatherInfo(info: WeatherInfo) {
-            tvWeatherIcon?.text = info.iconSymbol
-            tvWeatherTemp?.text = "${info.temperatureC}°"
-            val desc = if (info.minTempC != null && info.maxTempC != null) {
-                "${info.conditionZh} · 空气优 | ${info.minTempC}° / ${info.maxTempC}°"
-            } else {
-                "${info.conditionZh} · ${info.city}"
+            try {
+                tvWeatherIcon?.setCompoundDrawablesWithIntrinsicBounds(info.iconRes, 0, 0, 0)
+                tvWeatherIcon?.text = ""
+            } catch (_: Throwable) {
+                tvWeatherIcon?.text = info.iconSymbol
             }
-            tvWeatherDesc?.text = desc
+            tvWeatherTemp?.text = "${info.temperatureC}°"
+            val range = if (info.minTempC != null && info.maxTempC != null) {
+                "${info.minTempC}°~${info.maxTempC}°"
+            } else {
+                null
+            }
+            val aqiPart = if (info.aqi != null && !info.aqiLevelZh.isNullOrBlank()) {
+                "AQI ${info.aqi} ${info.aqiLevelZh}"
+            } else {
+                null
+            }
+            tvWeatherDesc?.text = listOfNotNull(
+                info.city.takeIf { it.isNotBlank() },
+                info.conditionZh,
+                range,
+                aqiPart
+            ).joinToString(" · ")
         }
 
         fun isLandscapeLayout(): Boolean {
