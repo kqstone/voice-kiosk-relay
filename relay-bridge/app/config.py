@@ -24,6 +24,8 @@ class Settings:
     search_timeout: float
     search_max_results: int
     search_hourly_limit: int
+    memory_enabled: bool
+    memory_db_path: Path
 
     def __init__(self) -> None:
         self.port = int(os.environ.get("PORT", "8093"))
@@ -52,6 +54,14 @@ class Settings:
         self.search_timeout = float(os.environ.get("SEARCH_TIMEOUT", "2.5"))
         self.search_max_results = int(os.environ.get("SEARCH_MAX_RESULTS", "3"))
         self.search_hourly_limit = int(os.environ.get("SEARCH_HOURLY_LIMIT", "60"))
+
+        # Long-term memory settings
+        self.memory_enabled = os.environ.get("MEMORY_ENABLED", "true").lower() in ("true", "1", "yes")
+        memory_db_env = os.environ.get("MEMORY_DB_PATH", "").strip()
+        if memory_db_env:
+            self.memory_db_path = Path(memory_db_env)
+        else:
+            self.memory_db_path = self.data_dir / "memory.db"
 
 
 settings = Settings()
