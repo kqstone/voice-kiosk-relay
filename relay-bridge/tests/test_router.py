@@ -13,6 +13,7 @@ from app.main import app
 from app.router import (
     OVERRIDE_LOCAL_PHRASES,
     OVERRIDE_MUSE_PHRASES,
+    ROUTER_SYSTEM_PROMPT,
     build_router_messages,
     check_explicit_override,
     clear_corrections,
@@ -224,6 +225,151 @@ class TestRouter(unittest.IsolatedAsyncioTestCase):
             disk_data = json.load(f)
         self.assertEqual(disk_data.get("version"), 1)
         self.assertEqual(len(disk_data.get("muse_keywords", [])), 2)
+
+    def test_router_system_prompt_specifications(self) -> None:
+        """Verify prompt directs fast factual/memory queries to local, and deep/action tasks to Muse."""
+        # 1. Local channel capabilities and factual queries
+        self.assertIn("联网搜索", ROUTER_SYSTEM_PROMPT)
+        self.assertIn("长期记忆", ROUTER_SYSTEM_PROMPT)
+        self.assertIn("新闻", ROUTER_SYSTEM_PROMPT)
+        self.assertIn("比分", ROUTER_SYSTEM_PROMPT)
+        self.assertIn("汇率", ROUTER_SYSTEM_PROMPT)
+        self.assertTrue("股票价格" in ROUTER_SYSTEM_PROMPT or "股价" in ROUTER_SYSTEM_PROMPT)
+
+        # 2. Local personal info / memory queries
+        self.assertIn("偏好", ROUTER_SYSTEM_PROMPT)
+        self.assertIn("习惯", ROUTER_SYSTEM_PROMPT)
+        self.assertIn("家庭成员", ROUTER_SYSTEM_PROMPT)
+        self.assertIn("城市", ROUTER_SYSTEM_PROMPT)
+        self.assertIn("作息", ROUTER_SYSTEM_PROMPT)
+
+        # 3. Muse channels for multi-step, deep analysis, and action tasks
+        self.assertIn("多步骤", ROUTER_SYSTEM_PROMPT)
+        self.assertTrue("批改与纠错" in ROUTER_SYSTEM_PROMPT or "批改" in ROUTER_SYSTEM_PROMPT)
+        self.assertIn("深度分析", ROUTER_SYSTEM_PROMPT)
+        self.assertIn("发送消息", ROUTER_SYSTEM_PROMPT)
+        self.assertIn("打印", ROUTER_SYSTEM_PROMPT)
+        self.assertIn("日程或提醒", ROUTER_SYSTEM_PROMPT)
+        self.assertTrue("完整智能体" in ROUTER_SYSTEM_PROMPT or "full agent" in ROUTER_SYSTEM_PROMPT)
+
+        # 4. Muse section should NOT direct external network search or personal memory to Muse
+        muse_section_start = ROUTER_SYSTEM_PROMPT.find("路由至 muse")
+        self.assertGreater(muse_section_start, 0)
+        muse_section_end = ROUTER_SYSTEM_PROMPT.find("【关键词提取要求】", muse_section_start)
+        muse_section_text = ROUTER_SYSTEM_PROMPT[muse_section_start:muse_section_end]
+        self.assertNotIn("查询外部网络", muse_section_text)
+        self.assertNotIn("需要记忆或个人信息", muse_section_text)
+
+    async def test_time_sensitive_and_memory_queries_route_local(self) -> None:
+        """Verify news, scores, exchange rates, stock prices, and memory queries route to local."""
+        cases = [
+            # News
+            ("今天的头条新闻是什么？", ["头条新闻"], "时效性事实查询，中继桥可联网搜索"),
+            # Scores
+            ("昨晚湖人对勇士的比分是多少？", ["湖人", "勇士", "比分"], "比赛比分事实查询，中继桥可联网搜索"),
+            # Exchange rate
+            ("今天美元对人民币汇率是多少？", ["美元", "人民币", "汇率"], "汇率事实查询，中继桥可联网搜索"),
+            # Stock price
+            ("苹果今天的股票价格是多少？", ["苹果", "股票价格"], "股票价格事实查询，中继桥可联网搜索"),
+            # Memory - preferences
+            ("爸爸平时最喜欢喝什么茶？", ["爸爸", "喝茶偏好"], "家庭成员偏好查询，中继桥具备长期记忆"),
+            # Memory - habits
+            ("安安晚上睡觉前有什么习惯？", ["安安", "睡前习惯"], "家庭成员生活习惯查询，中继桥具备长期记忆"),
+            # Memory - family
+            ("我们家有哪些家庭成员？", ["家庭成员"], "家庭成员信息查询，中继桥具备长期记忆"),
+            # Memory - city
+            ("我们家住在哪个城市？", ["居住城市"], "家庭常住城市查询，中继桥具备长期记忆"),
+            # Memory - routines
+            ("我们家平时的日常作息时间是怎样的？", ["日常作息"], "日常作息规律查询，中继桥具备长期记忆"),
+        ]
+
+        for question, keywords, reason in cases:
+            mock_llm_response = json.dumps({
+                "keywords": keywords,
+                "route": "local",
+                "reason": reason,
+            })
+            with patch("app.router.llm_client.chat", new_callable=AsyncMock) as mock_chat:
+                mock_chat.return_value = mock_llm_response
+                result = await route_question(question)
+                self.assertEqual(result.get("route"), "local", f"Failed for question: {question}")
+                self.assertEqual(result.get("keywords"), keywords)
+                self.assertEqual(result.get("reason"), reason)
+
+                # Ensure system prompt in message sent to LLM contains fast path capabilities
+                call_args = mock_chat.call_args
+                self.assertIsNotNone(call_args)
+                messages = call_args.kwargs.get("messages") or call_args.args[0]
+                self.assertEqual(messages[0]["role"], "system")
+                self.assertEqual(messages[0]["content"], ROUTER_SYSTEM_PROMPT)
+                self.assertIn(question, messages[1]["content"])
+
+    async def test_complex_and_action_tasks_route_to_muse(self) -> None:
+        """Verify multi-step tasks, homework correction, messaging, printing, and reminders route to Muse."""
+        cases = [
+            # Multi-step comprehensive task
+            ("帮我调研国内夏令营并制定全家出行方案和详细预算", ["夏令营", "出行方案", "预算"], "多步骤综合规划任务，需要完整智能体深度处理"),
+            # Homework correction and detailed analysis
+            ("帮安安批改这道奥数题并详细分析错误原因进行讲解纠错", ["安安", "奥数题", "批改纠错"], "看板作业批改与深度辅导，需要完整智能体深度处理"),
+            # Sending message
+            ("帮我发一条微信消息给妈妈说我今天晚点回家", ["妈妈", "发送消息"], "执行外部发送消息操作，需要完整智能体"),
+            # Printing
+            ("帮我把下周的英语词汇表打印出来", ["英语词汇表", "打印"], "执行外部打印操作，需要完整智能体"),
+            # Adding schedule / reminder
+            ("帮我添加明天上午十点的牙医预约日程提醒", ["牙医预约", "日程提醒"], "添加日程或提醒操作，需要完整智能体"),
+        ]
+
+        for question, keywords, reason in cases:
+            mock_llm_response = json.dumps({
+                "keywords": keywords,
+                "route": "muse",
+                "reason": reason,
+            })
+            with patch("app.router.llm_client.chat", new_callable=AsyncMock) as mock_chat:
+                mock_chat.return_value = mock_llm_response
+                result = await route_question(question)
+                self.assertEqual(result.get("route"), "muse", f"Failed for question: {question}")
+                self.assertEqual(result.get("keywords"), keywords)
+                self.assertEqual(result.get("reason"), reason)
+
+    def test_parse_router_response_various_scenarios(self) -> None:
+        """Verify parse_router_response handles both local and muse outputs, including markdown fences."""
+        # Local news response
+        local_news = json.dumps({
+            "keywords": ["科技新闻"],
+            "route": "local",
+            "reason": "时效性新闻查询",
+        })
+        parsed_local = parse_router_response(local_news)
+        self.assertEqual(parsed_local["route"], "local")
+        self.assertEqual(parsed_local["keywords"], ["科技新闻"])
+
+        # Local memory response wrapped in markdown fences
+        fence = chr(96) * 3
+        inner_json = json.dumps({"keywords": ["爸爸", "偏好"], "route": "local", "reason": "长期记忆偏好"})
+        local_memory_fenced = f"{fence}json\n{inner_json}\n{fence}"
+        parsed_memory = parse_router_response(local_memory_fenced)
+        self.assertEqual(parsed_memory["route"], "local")
+        self.assertEqual(parsed_memory["keywords"], ["爸爸", "偏好"])
+
+        # Muse homework correction response
+        muse_homework = json.dumps({
+            "keywords": ["数学作业", "批改"],
+            "route": "muse",
+            "reason": "作业批改与纠错",
+        })
+        parsed_muse = parse_router_response(muse_homework)
+        self.assertEqual(parsed_muse["route"], "muse")
+        self.assertEqual(parsed_muse["keywords"], ["数学作业", "批改"])
+
+        # Muse printing action
+        muse_print = json.dumps({
+            "keywords": ["试卷", "打印"],
+            "route": "muse",
+            "reason": "执行打印操作",
+        })
+        parsed_print = parse_router_response(muse_print)
+        self.assertEqual(parsed_print["route"], "muse")
 
 
 if __name__ == "__main__":
