@@ -23,8 +23,8 @@ interface MemoryConfirmations {
  *       → dedupe against the cached bridge snapshot and the local queue
  *       → low-risk categories: upload as "auto"; others (or a low-risk fact that would
  *         change an existing keyed memory): wait for a voice "是/不用" ([MemoryConfirmations])
- *       → POST /api/v2/memory/candidates (device token); the bridge re-validates and stays the
- *         source of truth; GET /api/v2/memory/snapshot?since= refreshes the cache.
+ *       → POST /api/v1/memory/candidates (device token); the bridge re-validates and stays the
+ *         source of truth; GET /api/v1/memory/snapshot?since= refreshes the cache.
  */
 class MemoryManager(
     private val backend: MemoryBackend,

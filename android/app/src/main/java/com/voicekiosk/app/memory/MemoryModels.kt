@@ -39,7 +39,7 @@ data class MemoryFact(
 /** A memory item as stored by the bridge ([com.voicekiosk.app.memory.MemoryBackend.snapshot]). */
 data class MemoryItem(val id: Long, val key: String, val content: String, val updatedAt: Double = 0.0)
 
-/** Incremental snapshot from `GET /api/v2/memory/snapshot?since=`. */
+/** Incremental snapshot from `GET /api/v1/memory/snapshot?since=`. */
 data class MemorySnapshot(
     val items: List<MemoryItem>,
     val deletedIds: List<Long> = emptyList(),
@@ -57,7 +57,7 @@ data class MemoryCandidate(
     val askedMs: Long = 0L
 )
 
-/** Per-candidate bridge answer (`POST /api/v2/memory/candidates`). */
+/** Per-candidate bridge answer (`POST /api/v1/memory/candidates`). */
 data class SubmitResult(val id: String, val status: String, val item: MemoryItem? = null) {
     /** Stored (or already there): drop it from the queue and show it in the cache. */
     val stored: Boolean
