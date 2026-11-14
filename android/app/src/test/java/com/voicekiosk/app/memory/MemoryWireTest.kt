@@ -8,6 +8,12 @@ import org.junit.Test
 
 class MemoryWireTest {
     @Test
+    fun endpointPathsUseV1() {
+        assertEquals("/api/v1/memory/snapshot", MemoryWire.SNAPSHOT_PATH)
+        assertEquals("/api/v1/memory/candidates", MemoryWire.CANDIDATES_PATH)
+    }
+
+    @Test
     fun requestAndResults() {
         val req = MemoryWire.request(listOf(
             MemoryCandidate("a", MemoryFact(MemoryCategory.CITY, "住在杭州", "所在城市"), 0, "auto"),

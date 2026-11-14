@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
+import threading
+import time
 from typing import Any
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
@@ -9,13 +11,16 @@ from app.auth import (
     verify_device_token,
     verify_push_token,
 )
+from app.config import settings
 from app.dashboard import parse_board_to_components, render_dashboard
 from app.llm import (
     BridgeLLMError,
     build_chat_system_prompt,
     format_board_summary,
+    format_memory_summary,
     llm_client,
 )
+from app.memory_store import memory_store
 from app.queue import conversation_queue
 from app.router import route_question
 from app.storage import board_storage, routing_config_storage
@@ -159,7 +164,11 @@ async def chat_endpoint(payload: ChatRequest) -> ChatResponse:
         return ChatResponse(reply=ack, route="muse", conversation_id=conv_id)
 
     boards_summary = format_board_summary(board_storage)
-    system_prompt = build_chat_system_prompt(boards_summary)
+    memory_summary = format_memory_summary(memory_store, user_query=clean_text)
+    system_prompt = build_chat_system_prompt(
+        boards_summary=boards_summary,
+        memory_summary=memory_summary,
+    )
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -409,6 +418,129 @@ def get_routing_config() -> dict[str, Any]:
     return routing_config_storage.get_config()
 
 
+class CandidatesRequest(BaseModel):
+    candidates: list[dict[str, Any]] = []
+
+
+class DeleteMemoryRequest(BaseModel):
+    id: int | None = None
+
+
+_idempotency_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_idempotency_lock = threading.Lock()
+IDEMPOTENCY_TTL_SECONDS = 86400  # 24 hours
+MAX_IDEMPOTENCY_ENTRIES = 1000
+
+
+@app.get(
+    "/api/v1/memory/snapshot",
+    dependencies=[Depends(verify_device_token)],
+)
+def get_memory_snapshot(
+    since: str = "",
+) -> dict[str, Any]:
+    return memory_store.get_snapshot(since=since)
+
+
+@app.post(
+    "/api/v1/memory/candidates",
+    dependencies=[Depends(verify_device_token)],
+)
+def submit_memory_candidates(
+    payload: CandidatesRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    key = idempotency_key.strip() if idempotency_key else ""
+    if key:
+        with _idempotency_lock:
+            now = time.time()
+            expired = [k for k, (ts, _) in _idempotency_cache.items() if now - ts > IDEMPOTENCY_TTL_SECONDS]
+            for k in expired:
+                del _idempotency_cache[k]
+            if key in _idempotency_cache:
+                return _idempotency_cache[key][1]
+
+    raw_candidates = [
+        c if isinstance(c, dict) else c.model_dump()
+        for c in payload.candidates
+    ]
+    res = memory_store.submit_candidates(raw_candidates)
+
+    if key:
+        with _idempotency_lock:
+            if len(_idempotency_cache) >= MAX_IDEMPOTENCY_ENTRIES:
+                oldest_k = min(_idempotency_cache.keys(), key=lambda k: _idempotency_cache[k][0])
+                del _idempotency_cache[oldest_k]
+            _idempotency_cache[key] = (time.time(), res)
+
+    return res
+
+
+@app.get(
+    "/api/v1/memories",
+    dependencies=[Depends(verify_device_token)],
+)
+def list_memories(
+    limit: int = 100,
+    offset: int = 0,
+    category: str | None = None,
+) -> list[dict[str, Any]]:
+    return memory_store.list_memories(limit=limit, offset=offset, category=category)
+
+
+@app.get(
+    "/api/v1/memories/{memory_id}",
+    dependencies=[Depends(verify_device_token)],
+)
+def get_memory_by_id(memory_id: int) -> dict[str, Any]:
+    mem = memory_store.get_memory(memory_id)
+    if mem is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory '{memory_id}' not found",
+        )
+    return mem
+
+
+@app.delete(
+    "/api/v1/memories/{memory_id}",
+    dependencies=[Depends(verify_device_token)],
+)
+def delete_memory_by_path(memory_id: int) -> dict[str, Any]:
+    deleted = memory_store.delete_memory(memory_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory '{memory_id}' not found",
+        )
+    return {"ok": True, "id": memory_id}
+
+
+@app.delete(
+    "/api/v1/memories",
+    dependencies=[Depends(verify_device_token)],
+)
+def delete_memory(
+    id: int | None = Query(default=None),
+    payload: DeleteMemoryRequest | None = None,
+) -> dict[str, Any]:
+    target_id = id
+    if target_id is None and payload is not None:
+        target_id = payload.id
+    if target_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Memory ID is required via query param '?id=...' or request body '{\"id\": ...}'",
+        )
+    deleted = memory_store.delete_memory(target_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory '{target_id}' not found",
+        )
+    return {"ok": True, "id": target_id}
+
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard() -> HTMLResponse:
     board_ids = board_storage.list_boards()
@@ -417,7 +549,8 @@ def dashboard() -> HTMLResponse:
         b = board_storage.get_board(bid)
         if b is not None:
             boards.append(b)
-    html_content = render_dashboard(boards)
+    memories = memory_store.list_memories() if settings.memory_enabled else []
+    html_content = render_dashboard(boards, memories=memories)
     return HTMLResponse(content=html_content)
 
 

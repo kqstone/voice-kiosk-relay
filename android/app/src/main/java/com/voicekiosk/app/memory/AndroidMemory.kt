@@ -54,8 +54,8 @@ class KeystoreCodec(private val alias: String = "voice_kiosk_memory_cache_key_v1
 internal class HttpStatusException(val code: Int, message: String) : IllegalStateException(message)
 
 /**
- * Device-token client for `GET /api/v2/memory/snapshot?since=` and
- * `POST /api/v2/memory/candidates` (S5). Same token handling as conversation turns: the
+ * Device-token client for `GET /api/v1/memory/snapshot?since=` and
+ * `POST /api/v1/memory/candidates` (S5). Same token handling as conversation turns: the
  * stored token is only sent to the origin it was saved for, as an Authorization header,
  * without redirects.
  */
@@ -100,7 +100,7 @@ class HttpMemoryBackend(private val context: Context) : MemoryBackend {
 
     override fun snapshot(since: String): Result<MemorySnapshot> {
         val encoded = if (since.isEmpty()) "" else URLEncoder.encode(since, "UTF-8")
-        val path = if (encoded.isEmpty()) "/api/v2/memory/snapshot" else "/api/v2/memory/snapshot?since=$encoded"
+        val path = if (encoded.isEmpty()) MemoryWire.SNAPSHOT_PATH else "${MemoryWire.SNAPSHOT_PATH}?since=$encoded"
         val first = call("GET", path, null)
         val json = first.getOrElse { err ->
             val code = (err as? HttpStatusException)?.code
@@ -115,7 +115,7 @@ class HttpMemoryBackend(private val context: Context) : MemoryBackend {
     override fun submit(candidates: List<MemoryCandidate>): Result<List<SubmitResult>> =
         call(
             "POST",
-            "/api/v2/memory/candidates",
+            MemoryWire.CANDIDATES_PATH,
             MemoryWire.request(candidates),
             idempotencyKey = UUID.randomUUID().toString()
         ).map { MemoryWire.results(it) }
@@ -123,6 +123,9 @@ class HttpMemoryBackend(private val context: Context) : MemoryBackend {
 
 /** JSON shapes of the bridge memory endpoints (JVM-testable). */
 object MemoryWire {
+    const val SNAPSHOT_PATH = "/api/v1/memory/snapshot"
+    const val CANDIDATES_PATH = "/api/v1/memory/candidates"
+
     fun request(candidates: List<MemoryCandidate>): JSONObject = JSONObject().put("candidates", JSONArray().apply {
         candidates.forEach { c ->
             put(JSONObject().put("id", c.id).put("content", c.fact.content).put("category", c.fact.category.wire)

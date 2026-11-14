@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import html
 import json
 from typing import Any
@@ -219,13 +220,17 @@ def parse_board_to_components(board_id: str, raw_board: Any) -> list[dict[str, A
     return components
 
 
-def render_dashboard(boards: list[dict[str, Any]]) -> str:
+def render_dashboard(
+    boards: list[dict[str, Any]],
+    memories: list[dict[str, Any]] | None = None,
+) -> str:
     """Renders OLED true dark HTML dashboard.
 
     - Pure black background (#000000)
     - Dark cards (#141416) with subtle borders (#27272A)
     - Strikethrough text and purple checked circles for completed items
     - Each board as its own distinct section
+    - Long-term memory management card
     """
     rendered_sections: list[str] = []
 
@@ -350,6 +355,73 @@ def render_dashboard(boards: list[dict[str, Any]]) -> str:
             rendered_sections.append(section_html)
 
     sections_block = "\n".join(rendered_sections)
+
+    memory_rows: list[str] = []
+    mem_list = memories or []
+    if not mem_list:
+        memory_rows.append('<tr><td colspan="6" class="item-empty">暂无长期记忆</td></tr>')
+    else:
+        for m in mem_list:
+            m_id = html.escape(str(m.get("id", "")))
+            m_cat = html.escape(str(m.get("category", "")))
+            m_key = html.escape(str(m.get("key", "")))
+            m_content = html.escape(str(m.get("content", "")))
+            m_time = html.escape(str(m.get("updated_at", "")))
+            try:
+                ts = float(m.get("updated_at", 0))
+                if ts > 0:
+                    dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                    m_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+
+            memory_rows.append(
+                f'<tr id="memory-row-{m_id}">'
+                f'<td class="mem-td-id">{m_id}</td>'
+                f'<td class="mem-td-cat"><span class="mem-badge-cat">{m_cat}</span></td>'
+                f'<td class="mem-td-key">{m_key or "-"}</td>'
+                f'<td class="mem-td-content">{m_content}</td>'
+                f'<td class="mem-td-time">{m_time}</td>'
+                f'<td class="mem-td-action"><button type="button" class="btn-delete-mem" onclick="deleteMemory({m_id})">删除</button></td>'
+                f'</tr>'
+            )
+
+    memory_section_html = (
+        '<section class="board-section memory-section" id="memory-management-card">'
+        + '<div class="board-header">'
+        + '<div class="header-left">'
+        + '<div class="title-row">'
+        + '<span class="indicator-dot" style="background: #10B981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);"></span>'
+        + '<h2 class="board-title">长期记忆管理</h2>'
+        + '<span class="board-tag" style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border-color: rgba(16, 185, 129, 0.3);">Memory Store</span>'
+        + '</div>'
+        + '<p class="board-subtitle">家庭成员个性化偏好与事实记忆（零信任存储与增量同步）</p>'
+        + '</div>'
+        + '<div class="header-right">'
+        + f'<span class="board-badge" id="memory-count-badge" style="background: #064e3b; color: #a7f3d0; border-color: rgba(16, 185, 129, 0.4);">{len(mem_list)} 条记忆</span>'
+        + '</div>'
+        + '</div>'
+        + '<div class="board-body">'
+        + '<div class="memory-table-wrapper" style="overflow-x: auto;">'
+        + '<table class="memory-table">'
+        + '<thead>'
+        + '<tr>'
+        + '<th style="width: 50px;">ID</th>'
+        + '<th style="width: 90px;">分类</th>'
+        + '<th style="width: 110px;">键名</th>'
+        + '<th>记忆内容</th>'
+        + '<th style="width: 160px;">时间</th>'
+        + '<th style="width: 70px;">操作</th>'
+        + '</tr>'
+        + '</thead>'
+        + '<tbody id="memory-table-body">'
+        + "".join(memory_rows)
+        + '</tbody>'
+        + '</table>'
+        + '</div>'
+        + '</div>'
+        + '</section>'
+    )
 
     html_doc = """<!DOCTYPE html>
 <html lang="zh-CN">
@@ -749,6 +821,67 @@ def render_dashboard(boards: list[dict[str, Any]]) -> str:
       border: 1px dashed var(--border-color);
       font-size: 16px;
     }
+    .memory-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      text-align: left;
+    }
+    .memory-table th {
+      padding: 10px 12px;
+      color: var(--text-secondary);
+      border-bottom: 1px solid var(--border-color);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .memory-table td {
+      padding: 12px;
+      border-bottom: 1px solid var(--border-color);
+      color: var(--text-main);
+      vertical-align: middle;
+    }
+    .memory-table tr:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .mem-td-id {
+      font-family: monospace;
+      color: var(--text-muted);
+    }
+    .mem-badge-cat {
+      font-size: 11px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(139, 92, 246, 0.15);
+      color: #c4b5fd;
+      border: 1px solid rgba(139, 92, 246, 0.3);
+      font-weight: 500;
+    }
+    .mem-td-key {
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    .mem-td-content {
+      word-break: break-word;
+    }
+    .mem-td-time {
+      font-size: 12px;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+    .btn-delete-mem {
+      padding: 4px 10px;
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-delete-mem:hover {
+      background: rgba(239, 68, 68, 0.3);
+      border-color: #ef4444;
+    }
   </style>
 </head>
 <body>
@@ -783,6 +916,10 @@ def render_dashboard(boards: list[dict[str, Any]]) -> str:
     <main class="boards-wrapper" id="boards-container">
 """ + sections_block + """
     </main>
+
+    <div class="boards-wrapper" id="memories-section-wrapper" style="margin-top: 20px;">
+""" + memory_section_html + """
+    </div>
   </div>
 
   <script>
@@ -1138,9 +1275,88 @@ def render_dashboard(boards: list[dict[str, Any]]) -> str:
         .catch(function(err) {});
     }
 
+    function fetchMemoriesWithToken(token) {
+      var tbody = document.getElementById('memory-table-body');
+      var badge = document.getElementById('memory-count-badge');
+      if (!tbody) return;
+
+      var headers = {};
+      if (token) {
+        headers['Authorization'] = 'Bearer ' + token;
+      }
+
+      fetch('/api/v1/memories', { headers: headers })
+        .then(function(res) {
+          if (!res.ok) {
+            throw new Error('fetch memories failed: ' + res.status);
+          }
+          return res.json();
+        })
+        .then(function(items) {
+          if (!Array.isArray(items)) return;
+          if (badge) {
+            badge.textContent = items.length + ' 条记忆';
+          }
+          if (items.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" class="item-empty">暂无长期记忆</td></tr>';
+            return;
+          }
+          var rowsHtml = '';
+          for (var i = 0; i < items.length; i++) {
+            var it = items[i];
+            var id = escapeHtml(it.id);
+            var cat = escapeHtml(it.category || '');
+            var key = escapeHtml(it.key || '-');
+            var content = escapeHtml(it.content || '');
+            var timeStr = '';
+            if (it.updated_at) {
+              var d = new Date(it.updated_at * 1000);
+              timeStr = d.getFullYear() + '-' +
+                        ('0' + (d.getMonth() + 1)).slice(-2) + '-' +
+                        ('0' + d.getDate()).slice(-2) + ' ' +
+                        ('0' + d.getHours()).slice(-2) + ':' +
+                        ('0' + d.getMinutes()).slice(-2) + ':' +
+                        ('0' + d.getSeconds()).slice(-2);
+            }
+            rowsHtml += '<tr id="memory-row-' + id + '">'
+              + '<td class="mem-td-id">' + id + '</td>'
+              + '<td class="mem-td-cat"><span class="mem-badge-cat">' + cat + '</span></td>'
+              + '<td class="mem-td-key">' + key + '</td>'
+              + '<td class="mem-td-content">' + content + '</td>'
+              + '<td class="mem-td-time">' + timeStr + '</td>'
+              + '<td class="mem-td-action"><button type="button" class="btn-delete-mem" onclick="deleteMemory(' + id + ')">删除</button></td>'
+              + '</tr>';
+          }
+          tbody.innerHTML = rowsHtml;
+        })
+        .catch(function(err) {});
+    }
+
+    function deleteMemory(id) {
+      if (!confirm('确定删除此记忆？')) return;
+      var token = getStoredToken();
+      var headers = {};
+      if (token) {
+        headers['Authorization'] = 'Bearer ' + token;
+      }
+      fetch('/api/v1/memories?id=' + encodeURIComponent(id), {
+        method: 'DELETE',
+        headers: headers
+      }).then(function(res) {
+        if (res.ok) {
+          manualRefresh();
+        } else {
+          alert('删除失败: ' + res.status);
+        }
+      }).catch(function(err) {
+        alert('删除出错: ' + err);
+      });
+    }
+
     function manualRefresh() {
       var token = getStoredToken();
       fetchBoardsWithToken(token);
+      fetchMemoriesWithToken(token);
     }
 
     var ws = null;
@@ -1193,6 +1409,7 @@ def render_dashboard(boards: list[dict[str, Any]]) -> str:
         var t = getStoredToken();
         if (t) {
           fetchBoardsWithToken(t);
+          fetchMemoriesWithToken(t);
         }
       }, 30000);
     });
