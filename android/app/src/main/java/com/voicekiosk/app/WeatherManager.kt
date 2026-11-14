@@ -3,6 +3,9 @@ package com.voicekiosk.app
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import com.voicekiosk.app.ondevice.tools.DayForecast
+import com.voicekiosk.app.ondevice.tools.Forecast
+import com.voicekiosk.app.weather.WeatherRepository
 import org.json.JSONObject
 import java.io.IOException
 import java.net.HttpURLConnection
@@ -20,6 +23,18 @@ data class CityLocation(
     val admin1: String = ""
 )
 
+data class DayForecastItem(
+    val date: String,
+    val weatherCode: Int,
+    val conditionZh: String,
+    val iconSymbol: String,
+    val minTempC: Int?,
+    val maxTempC: Int?,
+    val precipitationProb: Int? = null,
+    val sunrise: String? = null,
+    val sunset: String? = null
+)
+
 data class WeatherInfo(
     val city: String,
     val temperatureC: Int,
@@ -28,7 +43,16 @@ data class WeatherInfo(
     val weatherCode: Int,
     val conditionZh: String,
     val iconSymbol: String,
-    val updatedAtMs: Long
+    val updatedAtMs: Long,
+    val apparentTempC: Int? = null,
+    val relativeHumidity: Int? = null,
+    val windSpeedKmh: Float? = null,
+    val precipitationProb: Int? = null,
+    val sunrise: String? = null,
+    val sunset: String? = null,
+    val aqi: Int? = null,
+    val aqiLevelZh: String? = null,
+    val forecastDays: List<DayForecastItem> = emptyList()
 ) {
     fun formatDisplayLine(): String {
         return if (minTempC != null && maxTempC != null) {
@@ -37,48 +61,64 @@ data class WeatherInfo(
             "$city · $iconSymbol $conditionZh ${temperatureC}°C"
         }
     }
+
+    fun toForecast(): Forecast {
+        val dayForecastList = if (forecastDays.isNotEmpty()) {
+            forecastDays.map {
+                DayForecast(
+                    date = it.date,
+                    code = it.weatherCode,
+                    maxC = (it.maxTempC ?: temperatureC).toDouble(),
+                    minC = (it.minTempC ?: temperatureC).toDouble(),
+                    precipProb = it.precipitationProb
+                )
+            }
+        } else if (minTempC != null && maxTempC != null) {
+            listOf(
+                DayForecast(
+                    date = "",
+                    code = weatherCode,
+                    maxC = maxTempC.toDouble(),
+                    minC = minTempC.toDouble(),
+                    precipProb = precipitationProb
+                )
+            )
+        } else {
+            emptyList()
+        }
+
+        return Forecast(
+            city = city,
+            currentC = temperatureC.toDouble(),
+            currentCode = weatherCode,
+            days = dayForecastList
+        )
+    }
 }
 
 /**
  * Zero-API-key weather & city location manager using Open-Meteo.
+ * Delegated to [WeatherRepository] for unified client-side weather caching.
  */
 object WeatherManager {
-    const val CACHE_COOLDOWN_MS = 30 * 60 * 1000L
-    const val HTTP_TIMEOUT_MS = 6000
+    const val CACHE_COOLDOWN_MS = WeatherRepository.CACHE_TTL_MS
+    const val HTTP_TIMEOUT_MS = WeatherRepository.HTTP_MAIN_TIMEOUT_MS
+    const val HTTP_AQI_TIMEOUT_MS = WeatherRepository.HTTP_AQI_TIMEOUT_MS
 
     interface WeatherListener {
         fun onWeatherUpdated(info: WeatherInfo)
     }
 
-    private val listeners = java.util.concurrent.CopyOnWriteArrayList<WeatherListener>()
-
-    @Volatile
-    private var cachedWeatherInfo: WeatherInfo? = null
-
     fun getCachedWeatherInfo(context: Context? = null): WeatherInfo? {
-        cachedWeatherInfo?.let { return it }
-        if (context != null) {
-            val cachedStr = AppConfig.getCachedWeatherSummary(context)
-            if (cachedStr.isNotEmpty()) {
-                val parsed = parseCachedSummary(cachedStr)
-                if (parsed != null) {
-                    cachedWeatherInfo = parsed
-                    return parsed
-                }
-            }
-        }
-        return null
+        return WeatherRepository.getCachedWeatherInfo(context)
     }
 
     fun addListener(listener: WeatherListener) {
-        listeners.add(listener)
-        cachedWeatherInfo?.let { info ->
-            dispatchMain { listener.onWeatherUpdated(info) }
-        }
+        WeatherRepository.addListener(listener)
     }
 
     fun removeListener(listener: WeatherListener) {
-        listeners.remove(listener)
+        WeatherRepository.removeListener(listener)
     }
 
     fun parseCachedSummary(summary: String): WeatherInfo? {
@@ -139,7 +179,11 @@ object WeatherManager {
         Thread(runnable, "weather-worker").apply { isDaemon = true }
     }
 
-    internal var mainExecutor: ((() -> Unit) -> Unit)? = null
+    internal var mainExecutor: ((() -> Unit) -> Unit)?
+        get() = WeatherRepository.mainDispatcher
+        set(value) {
+            WeatherRepository.mainDispatcher = value
+        }
 
     private fun dispatchMain(action: () -> Unit) {
         mainExecutor?.invoke(action) ?: run {
@@ -171,7 +215,45 @@ object WeatherManager {
         }
     }
 
-    fun parseForecastJson(city: String, jsonStr: String, nowMs: Long = System.currentTimeMillis()): WeatherInfo? {
+    fun formatSunTime(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        return if (raw.contains("T")) raw.substringAfter("T") else raw
+    }
+
+    fun mapAqiToLevelZh(aqi: Int): String {
+        return when {
+            aqi <= 50 -> "优"
+            aqi <= 100 -> "良"
+            aqi <= 150 -> "轻度"
+            aqi <= 200 -> "中度"
+            aqi <= 300 -> "重度"
+            else -> "严重"
+        }
+    }
+
+    fun parseAqiJson(jsonStr: String): Pair<Int, String>? {
+        if (jsonStr.isBlank()) return null
+        return try {
+            val root = JSONObject(jsonStr)
+            val current = root.optJSONObject("current") ?: return null
+            val aqiValue = when {
+                current.has("us_aqi") && !current.isNull("us_aqi") -> current.optDouble("us_aqi").roundToInt()
+                current.has("european_aqi") && !current.isNull("european_aqi") -> current.optDouble("european_aqi").roundToInt()
+                else -> null
+            } ?: return null
+            val level = mapAqiToLevelZh(aqiValue)
+            Pair(aqiValue, level)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun parseForecastJson(
+        city: String,
+        jsonStr: String,
+        nowMs: Long = System.currentTimeMillis(),
+        aqiJsonStr: String? = null
+    ): WeatherInfo? {
         if (jsonStr.isBlank()) return null
         return try {
             val root = JSONObject(jsonStr)
@@ -183,18 +265,95 @@ object WeatherManager {
             val weatherCode = current.getInt("weather_code")
             val (conditionZh, iconSymbol) = mapWmoWeatherCode(weatherCode)
 
+            val apparentTempC = if (current.has("apparent_temperature") && !current.isNull("apparent_temperature")) {
+                current.getDouble("apparent_temperature").roundToInt()
+            } else null
+
+            val relativeHumidity = if (current.has("relative_humidity_2m") && !current.isNull("relative_humidity_2m")) {
+                current.getDouble("relative_humidity_2m").roundToInt()
+            } else null
+
+            val windSpeedKmh = if (current.has("wind_speed_10m") && !current.isNull("wind_speed_10m")) {
+                current.getDouble("wind_speed_10m").toFloat()
+            } else null
+
             var minTempC: Int? = null
             var maxTempC: Int? = null
+            var precipProb: Int? = null
+            var sunrise: String? = null
+            var sunset: String? = null
+            val forecastDays = mutableListOf<DayForecastItem>()
+
             val daily = root.optJSONObject("daily")
             if (daily != null) {
                 val minArr = daily.optJSONArray("temperature_2m_min")
+                val maxArr = daily.optJSONArray("temperature_2m_max")
+                val precipArr = daily.optJSONArray("precipitation_probability_max")
+                val sunriseArr = daily.optJSONArray("sunrise")
+                val sunsetArr = daily.optJSONArray("sunset")
+                val timeArr = daily.optJSONArray("time")
+                val codeArr = daily.optJSONArray("weather_code")
+
                 if (minArr != null && minArr.length() > 0 && !minArr.isNull(0)) {
                     minTempC = minArr.getDouble(0).roundToInt()
                 }
-                val maxArr = daily.optJSONArray("temperature_2m_max")
                 if (maxArr != null && maxArr.length() > 0 && !maxArr.isNull(0)) {
                     maxTempC = maxArr.getDouble(0).roundToInt()
                 }
+                if (precipArr != null && precipArr.length() > 0 && !precipArr.isNull(0)) {
+                    precipProb = precipArr.optInt(0)
+                }
+                if (sunriseArr != null && sunriseArr.length() > 0 && !sunriseArr.isNull(0)) {
+                    sunrise = formatSunTime(sunriseArr.optString(0))
+                }
+                if (sunsetArr != null && sunsetArr.length() > 0 && !sunsetArr.isNull(0)) {
+                    sunset = formatSunTime(sunsetArr.optString(0))
+                }
+
+                if (timeArr != null) {
+                    for (i in 0 until timeArr.length()) {
+                        val date = timeArr.optString(i, "")
+                        val dayCode = if (codeArr != null && codeArr.length() > i && !codeArr.isNull(i)) {
+                            codeArr.optInt(i, weatherCode)
+                        } else weatherCode
+                        val (dayCond, dayIcon) = mapWmoWeatherCode(dayCode)
+                        val dayMin = if (minArr != null && minArr.length() > i && !minArr.isNull(i)) {
+                            minArr.optDouble(i).roundToInt()
+                        } else null
+                        val dayMax = if (maxArr != null && maxArr.length() > i && !maxArr.isNull(i)) {
+                            maxArr.optDouble(i).roundToInt()
+                        } else null
+                        val dayPrecip = if (precipArr != null && precipArr.length() > i && !precipArr.isNull(i)) {
+                            precipArr.optInt(i)
+                        } else null
+                        val daySunrise = if (sunriseArr != null && sunriseArr.length() > i && !sunriseArr.isNull(i)) {
+                            formatSunTime(sunriseArr.optString(i))
+                        } else null
+                        val daySunset = if (sunsetArr != null && sunsetArr.length() > i && !sunsetArr.isNull(i)) {
+                            formatSunTime(sunsetArr.optString(i))
+                        } else null
+
+                        forecastDays.add(
+                            DayForecastItem(
+                                date = date,
+                                weatherCode = dayCode,
+                                conditionZh = dayCond,
+                                iconSymbol = dayIcon,
+                                minTempC = dayMin,
+                                maxTempC = dayMax,
+                                precipitationProb = dayPrecip,
+                                sunrise = daySunrise,
+                                sunset = daySunset
+                            )
+                        )
+                    }
+                }
+            }
+
+            val (aqi, aqiLevelZh) = if (!aqiJsonStr.isNullOrBlank()) {
+                parseAqiJson(aqiJsonStr) ?: (null to null)
+            } else {
+                null to null
             }
 
             WeatherInfo(
@@ -205,7 +364,16 @@ object WeatherManager {
                 weatherCode = weatherCode,
                 conditionZh = conditionZh,
                 iconSymbol = iconSymbol,
-                updatedAtMs = nowMs
+                updatedAtMs = nowMs,
+                apparentTempC = apparentTempC,
+                relativeHumidity = relativeHumidity,
+                windSpeedKmh = windSpeedKmh,
+                precipitationProb = precipProb,
+                sunrise = sunrise,
+                sunset = sunset,
+                aqi = aqi,
+                aqiLevelZh = aqiLevelZh,
+                forecastDays = forecastDays
             )
         } catch (_: Exception) {
             null
@@ -256,61 +424,11 @@ object WeatherManager {
     }
 
     fun fetchWeatherIfNeeded(context: Context, force: Boolean = false, onResult: (String) -> Unit) {
-        val cached = AppConfig.getCachedWeatherSummary(context)
-        val lastFetch = AppConfig.getLastWeatherFetchMs(context)
-        val now = System.currentTimeMillis()
-        if (!force && cached.isNotEmpty() && (now - lastFetch) < CACHE_COOLDOWN_MS) {
-            val cachedInfo = cachedWeatherInfo ?: parseCachedSummary(cached)
-            if (cachedInfo != null) {
-                cachedWeatherInfo = cachedInfo
-                for (listener in listeners) {
-                    dispatchMain { listener.onWeatherUpdated(cachedInfo) }
-                }
-            }
-            dispatchMain { onResult(cached) }
-            return
-        }
-
-        val lat = AppConfig.getWeatherLatitude(context)
-        val lon = AppConfig.getWeatherLongitude(context)
-        val city = AppConfig.getWeatherCity(context)
-
-        ioExecutor.execute {
-            try {
-                val urlStr = String.format(
-                    Locale.US,
-                    "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto",
-                    lat, lon
-                )
-                val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = HTTP_TIMEOUT_MS
-                    readTimeout = HTTP_TIMEOUT_MS
-                    requestMethod = "GET"
-                    setRequestProperty("User-Agent", "VoiceKiosk/1.0")
-                }
-                try {
-                    if (conn.responseCode in 200..299) {
-                        val body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                        val fetchNow = System.currentTimeMillis()
-                        val info = parseForecastJson(city, body, fetchNow)
-                        if (info != null) {
-                            cachedWeatherInfo = info
-                            val displayLine = info.formatDisplayLine()
-                            AppConfig.setCachedWeatherSummary(context, displayLine)
-                            AppConfig.setLastWeatherFetchMs(context, fetchNow)
-                            for (listener in listeners) {
-                                dispatchMain { listener.onWeatherUpdated(info) }
-                            }
-                            dispatchMain { onResult(displayLine) }
-                            return@execute
-                        }
-                    }
-                } finally {
-                    conn.disconnect()
-                }
-                dispatchMain { onResult(cached) }
-            } catch (_: Exception) {
-                dispatchMain { onResult(cached) }
+        WeatherRepository.fetchWeather(context, force) { result ->
+            result.onSuccess { info ->
+                onResult(info.formatDisplayLine())
+            }.onFailure {
+                onResult(AppConfig.getCachedWeatherSummary(context))
             }
         }
     }

@@ -90,7 +90,9 @@ object AppConfig {
     private const val KEY_WEATHER_LATITUDE = "pref_weather_latitude"
     private const val KEY_WEATHER_LONGITUDE = "pref_weather_longitude"
     private const val KEY_CACHED_WEATHER_SUMMARY = "pref_cached_weather_summary"
+    const val KEY_CACHED_WEATHER_JSON = "pref_cached_weather_json"
     private const val KEY_LAST_WEATHER_FETCH_MS = "pref_last_weather_fetch_ms"
+    const val WEATHER_CACHE_TTL_MS = 30 * 60 * 1000L
     private const val KEY_STARTUP_UPDATE_CHECK_ENABLED = "pref_startup_update_check_enabled"
     private const val KEY_LAST_STARTUP_UPDATE_CHECK_MS = "pref_last_startup_update_check_ms"
 
@@ -347,6 +349,22 @@ object AppConfig {
 
     fun setCachedWeatherSummary(context: Context, summary: String) {
         prefs(context).edit().putString(KEY_CACHED_WEATHER_SUMMARY, summary).apply()
+    }
+
+    fun getCachedWeatherJson(context: Context): String =
+        prefs(context).getString(KEY_CACHED_WEATHER_JSON, "") ?: ""
+
+    fun setCachedWeatherJson(context: Context, json: String) {
+        prefs(context).edit().putString(KEY_CACHED_WEATHER_JSON, json).apply()
+    }
+
+    fun isWeatherCacheValid(lastFetchMs: Long, nowMs: Long = System.currentTimeMillis()): Boolean =
+        lastFetchMs > 0L && (nowMs - lastFetchMs) in 0 until WEATHER_CACHE_TTL_MS
+
+    fun isWeatherCacheValid(context: Context, nowMs: Long = System.currentTimeMillis()): Boolean {
+        val lastFetch = getLastWeatherFetchMs(context)
+        val json = getCachedWeatherJson(context)
+        return json.isNotEmpty() && isWeatherCacheValid(lastFetch, nowMs)
     }
 
     fun getLastWeatherFetchMs(context: Context): Long =
