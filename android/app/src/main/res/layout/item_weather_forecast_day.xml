@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingTop="5dp"
+    android:paddingBottom="5dp">
+
+    <!-- Day label (e.g. 今天, 周一) -->
+    <TextView
+        android:id="@+id/tvDayName"
+        android:layout_width="48dp"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium"
+        android:textColor="@color/text_white"
+        android:textSize="13sp"
+        tools:text="今天" />
+
+    <!-- Weather condition icon -->
+    <ImageView
+        android:id="@+id/ivDayIcon"
+        android:layout_width="20dp"
+        android:layout_height="20dp"
+        android:layout_marginStart="4dp"
+        android:layout_marginEnd="8dp"
+        android:contentDescription="Weather Condition Icon"
+        android:scaleType="centerInside"
+        tools:src="@drawable/ic_weather_sunny" />
+
+    <!-- Weather Condition text -->
+    <TextView
+        android:id="@+id/tvDayCondition"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:ellipsize="end"
+        android:singleLine="true"
+        android:textColor="@color/text_secondary"
+        android:textSize="12sp"
+        tools:text="多云" />
+
+    <!-- Precipitation Probability (e.g. 30%) -->
+    <TextView
+        android:id="@+id/tvDayPrecip"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="10dp"
+        android:textColor="@color/accent_cyan"
+        android:textSize="11sp"
+        android:visibility="gone"
+        tools:text="30%"
+        tools:visibility="visible" />
+
+    <!-- Temperature range (min° ~ max°) -->
+    <TextView
+        android:id="@+id/tvDayTempRange"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium"
+        android:gravity="end"
+        android:minWidth="60dp"
+        android:textColor="@color/text_white"
+        android:textSize="13sp"
+        tools:text="14° ~ 22°" />
+
+</LinearLayout>
