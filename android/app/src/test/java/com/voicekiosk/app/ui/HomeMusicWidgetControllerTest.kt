@@ -117,6 +117,17 @@ class HomeMusicWidgetControllerTest {
         assertEquals("音频已暂停", HomeMusicWidgetController.formatTrackTitle(state))
     }
 
+    @Test
+    fun testFormatTrackTitle_guidanceScenario_showsAudioPlaying() {
+        val state = MusicState(
+            isPlaying = true,
+            title = "",
+            hasNotificationAccess = false,
+            confirmedExternalPlayback = true
+        )
+        assertEquals("有音频在播放", HomeMusicWidgetController.formatTrackTitle(state))
+    }
+
     // =========================================================================
     // 3. Artist and Source App Formatting
     // =========================================================================
@@ -406,6 +417,22 @@ class HomeMusicWidgetControllerTest {
 
         // Active session with blank title and not playing: hidden
         assertFalse(controller.shouldBeVisible(MusicState(hasActiveSession = true, isPlaying = false, title = "")))
+    }
+
+    @Test
+    fun testShouldBeVisible_guidanceScenario() {
+        val guidanceState = MusicState(
+            isPlaying = true,
+            title = "",
+            hasNotificationAccess = false,
+            hasActiveSession = false,
+            confirmedExternalPlayback = true,
+            isSuppressed = false
+        )
+        assertTrue(
+            "HomeMusicWidgetController should be visible for guidance scenario",
+            controller.shouldBeVisible(guidanceState)
+        )
     }
 
     @Test

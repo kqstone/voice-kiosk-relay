@@ -44,6 +44,11 @@ Android 手机（通用，任意 arm64 Android 手机，不定死某一型号）
   - `ondevice/`：LlmEngine.kt、NativeLlm.kt、OnDeviceModelCatalog.kt、OnDeviceModelDownloader.kt、DeviceTierDetector.kt、RoutingDefaults.kt、PromptFormat.kt（本地小模型 llama.cpp/GGUF，S0–S6 分级）。
   - `ondevice/tools/`：LocalToolExecutor.kt、Weather.kt、CityTable.kt、AndroidLocalPlatform.kt。本地工具白名单（S1）：时间/日期、音量（STREAM_MUSIC，setVolumeIndex/setMuted）、媒体键、播歌（第三方播放器）、应用内定时器；天气走 Open-Meteo（免费无 key，今日+2 天，20 分钟缓存，超时短、慢了就 fallbackToCloud 去桥）。`ToolResult.fallbackToCloud`：本地工具答不了就发给桥。
   - 唤醒词、ASR（Sherpa）、TTS、WebView 看板：不动。
+  - 本机 TTS 与对话音频策略：
+    - TTS 引擎可见性：在 AndroidManifest.xml 中声明 `<queries>`（`android.intent.action.TTS_SERVICE`），支持 Android 11+ 枚举并选择系统已安装引擎。
+    - 设置页试听与回退：支持系统默认引擎与候选引擎自动降级，纯设备端执行无云端 TTS 依赖。
+    - 音频焦点与音乐恢复：唤醒时请求瞬态独占音频焦点（USAGE_ASSISTANT），主动暂停第三方音乐；会话结束且未被用户媒体指令覆盖时自动恢复播放；定时器只 duck 不暂停。
+    - 音乐检测隔离与引导卡片：TTS 走 USAGE_ASSISTANT，兜底检测仅看 USAGE_MEDIA/GAME 且排除自身；对话中与 TTS 结束后 3 秒门控抑制；未授权通知时确认第三方播放展示引导卡片。
 - 要改的部分（新桥适配）：
   - 桥地址：从旧 v2 API 改为新桥的 `/api/v1/chat` 与 `/`（dashboard）。具体常量位置见代码（AppConfig / BridgeUrl）。
   - 两段式回复：支持“先提示、后正式答案”。走 Muse 路时，桥先回提示（TTS 说出），手机保持“等 Muse”状态（屏幕显示等待中）；正式答案经 WebSocket 推到手机后 TTS 说出，再回落到唤醒监听。超时（2 分钟）按桥的兜底处理。

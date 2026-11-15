@@ -14,6 +14,7 @@ import android.widget.TextView
 import com.voicekiosk.app.R
 import com.voicekiosk.app.media.MediaControlAction
 import com.voicekiosk.app.media.MusicState
+import com.voicekiosk.app.media.MusicVisibilityPolicy
 import java.util.Locale
 
 /**
@@ -228,7 +229,13 @@ class HomeMusicWidgetController(
             return if (state.title.isNotEmpty()) {
                 state.title
             } else {
-                if (state.isPlaying) "正在播放音频" else "音频已暂停"
+                if (!state.hasNotificationAccess && (state.confirmedExternalPlayback || state.isPlaying)) {
+                    "有音频在播放"
+                } else if (state.isPlaying) {
+                    "正在播放音频"
+                } else {
+                    "音频已暂停"
+                }
             }
         }
 
@@ -325,7 +332,7 @@ class HomeMusicWidgetController(
      */
     fun shouldBeVisible(state: MusicState? = currentState): Boolean {
         val s = state ?: return false
-        return s.hasActiveSession && (s.title.isNotBlank() || s.isPlaying)
+        return MusicVisibilityPolicy.shouldShowCard(s) || (s.hasActiveSession && (s.title.isNotBlank() || s.isPlaying))
     }
 
     fun updateProgress() {

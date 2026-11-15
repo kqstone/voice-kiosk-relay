@@ -1,6 +1,7 @@
 package com.voicekiosk.app.ui
 
 import com.voicekiosk.app.media.MusicState
+import com.voicekiosk.app.media.MusicVisibilityPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -408,7 +409,7 @@ class HomeLayoutTest {
     fun testOrientationSwitch_widgetVisibilitySimulation() {
         // Dual-layout visibility decision function matching MainPagerAdapter.kt
         fun shouldShowMusicCard(state: MusicState?): Boolean {
-            return state != null && state.hasActiveSession && state.title.isNotEmpty()
+            return MusicVisibilityPolicy.shouldShowCard(state)
         }
 
         // 1. Initial State: App opens in Portrait, no music session

@@ -22,6 +22,7 @@ import com.voicekiosk.app.data.BoardComponent
 import com.voicekiosk.app.data.BoardModel
 import com.voicekiosk.app.media.MediaControlAction
 import com.voicekiosk.app.media.MusicState
+import com.voicekiosk.app.media.MusicVisibilityPolicy
 
 /**
  * Pager adapter for the horizontal navigation container (ViewPager2).
@@ -162,8 +163,7 @@ class MainPagerAdapter(
         when (holder) {
             is HomeViewHolder -> {
                 activeHomeViewHolder = holder
-                val state = musicState
-                val shouldShow = state != null && state.hasActiveSession && state.title.isNotEmpty()
+                val shouldShow = MusicVisibilityPolicy.shouldShowCard(musicState)
                 holder.bind(musicState, isMusicVisible = shouldShow)
             }
             is BoardViewHolder -> {
@@ -451,9 +451,7 @@ class MainPagerAdapter(
             if (musicState != null) {
                 currentMusicState = musicState
             }
-            val targetVisibility = isMusicVisible ?: currentMusicState?.let {
-                it.hasActiveSession && it.title.isNotEmpty()
-            } ?: false
+            val targetVisibility = isMusicVisible ?: MusicVisibilityPolicy.shouldShowCard(currentMusicState)
             this.isMusicVisible = targetVisibility
 
             val currentOrientation = try {
@@ -531,8 +529,7 @@ class MainPagerAdapter(
 
         fun updateMusicState(state: MusicState) {
             currentMusicState = state
-            // 以 hasActiveSession（或非空曲目）为准控制卡片显隐，避免暂停时反复跳变
-            val shouldShowCard = state.hasActiveSession && state.title.isNotEmpty()
+            val shouldShowCard = MusicVisibilityPolicy.shouldShowCard(state)
             setMusicCardVisible(shouldShowCard)
             musicWidgetController?.bind(state)
         }

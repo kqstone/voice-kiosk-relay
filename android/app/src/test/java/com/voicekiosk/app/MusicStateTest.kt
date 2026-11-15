@@ -26,6 +26,8 @@ class MusicStateTest {
         assertNull(state.albumArtUri)
         assertTrue(state.hasNotificationAccess)
         assertFalse(state.hasActiveSession)
+        assertFalse(state.confirmedExternalPlayback)
+        assertFalse(state.isSuppressed)
     }
 
     @Test

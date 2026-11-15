@@ -46,6 +46,7 @@ import com.voicekiosk.app.conversation.QuestionAnswerMatcher
 import com.voicekiosk.app.conversation.QuestionMatch
 import com.voicekiosk.app.media.AudioFocusCoordinator
 import com.voicekiosk.app.media.MediaExecutedAction
+import com.voicekiosk.app.media.MusicStateManager
 import com.voicekiosk.app.ondevice.route.RouterModelHost
 import com.voicekiosk.app.ondevice.route.RuleRouter
 import com.voicekiosk.app.ondevice.route.TurnOrchestrator
@@ -246,6 +247,20 @@ class VoiceKioskService : Service() {
                 start(appContext)
             }, 500L)
         }
+
+        fun isInDialogue(): Boolean {
+            val inst = instance ?: return false
+            return inst.pipelineState != PipelineState.KWS_LISTENING
+        }
+    }
+
+    private fun setPipelineState(newState: PipelineState) {
+        pipelineState = newState
+        WakeWordEventBus.emitStateChanged(newState.name)
+        try {
+            val suppress = (newState != PipelineState.KWS_LISTENING)
+            MusicStateManager.getInstance(applicationContext).setSuppressFallback(suppress)
+        } catch (_: Throwable) {}
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -534,11 +549,10 @@ class VoiceKioskService : Service() {
 
         setupOnDeviceRouting()
 
-        pipelineState = PipelineState.KWS_LISTENING
+        setPipelineState(PipelineState.KWS_LISTENING)
         isRecording = true
         audioRecord?.startRecording()
         WakeWordEventBus.emitStatus(true, "正在监听：${AppConfig.getWakeWord(this)}")
-        WakeWordEventBus.emitStateChanged(pipelineState.name)
 
         recordingThread = thread(name = "VoiceKiosk-AudioThread", isDaemon = true) {
             processAudioLoop()
@@ -783,8 +797,7 @@ class VoiceKioskService : Service() {
 
                 // 6. Re-arm KWS_LISTENING
                 currentKws.reset(currentStream)
-                pipelineState = PipelineState.KWS_LISTENING
-                WakeWordEventBus.emitStateChanged(pipelineState.name)
+                setPipelineState(PipelineState.KWS_LISTENING)
                 Log.i(TAG, "Re-armed KWS_LISTENING")
                 break
             }
@@ -819,8 +832,7 @@ class VoiceKioskService : Service() {
                 Log.e(TAG, "Error processing simulated utterance", e)
             } finally {
                 audioFocusCoordinator.onSessionEnded()
-                pipelineState = PipelineState.KWS_LISTENING
-                WakeWordEventBus.emitStateChanged(pipelineState.name)
+                setPipelineState(PipelineState.KWS_LISTENING)
             }
         }
     }
@@ -906,8 +918,7 @@ class VoiceKioskService : Service() {
 
             if (outcome != TurnOutcome.ANSWERED) {
                 if (outcome == TurnOutcome.SILENCE && isFollowUp) {
-                    pipelineState = PipelineState.SPEAKING
-                    WakeWordEventBus.emitStateChanged(pipelineState.name)
+                    setPipelineState(PipelineState.SPEAKING)
                     speakBlocking(SESSION_SILENCE_PROMPT)
                     drainAudioSamples(record, shortBuffer, 150L)
                 }
@@ -931,8 +942,7 @@ class VoiceKioskService : Service() {
         noSpeechTimeoutMs: Long,
         isFollowUp: Boolean
     ): TurnOutcome {
-        pipelineState = PipelineState.ASR_LISTENING
-        WakeWordEventBus.emitStateChanged(pipelineState.name)
+        setPipelineState(PipelineState.ASR_LISTENING)
 
         // Ensure ASR recognizer is ready (if download finished or needs retry)
         if (!isAsrReady) {
@@ -1090,8 +1100,7 @@ class VoiceKioskService : Service() {
         shortBuffer: ShortArray?,
         recognizedText: String
     ): TurnOutcome {
-        pipelineState = PipelineState.SPEAKING
-        WakeWordEventBus.emitStateChanged(pipelineState.name)
+        setPipelineState(PipelineState.SPEAKING)
 
         orchestrator?.let { return orchestratedTurn(it, record, shortBuffer, recognizedText) }
 
@@ -1346,8 +1355,7 @@ class VoiceKioskService : Service() {
         drainAudioSamples(record, shortBuffer, 150L)
 
         Log.i(TAG, "Entering waiting state for Muse conversation_id=$conversationId")
-        pipelineState = PipelineState.WAITING
-        WakeWordEventBus.emitStateChanged(pipelineState.name)
+        setPipelineState(PipelineState.WAITING)
         val waitingText = "等待 Muse 回复中"
         WakeWordEventBus.emitWaitingForMuse(waitingText)
         WakeWordEventBus.emitChatReply(waitingText)
@@ -1407,8 +1415,7 @@ class VoiceKioskService : Service() {
 
         val toSpeak = finalReply ?: ConversationPoller.FALLBACK_TIMEOUT_REPLY
         orchestrator?.context?.updateLastReply(toSpeak)
-        pipelineState = PipelineState.SPEAKING
-        WakeWordEventBus.emitStateChanged(pipelineState.name)
+        setPipelineState(PipelineState.SPEAKING)
         WakeWordEventBus.emitChatReply(toSpeak)
         speakBlocking(toSpeak)
         drainAudioSamples(record, shortBuffer, 150L)

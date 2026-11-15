@@ -5,6 +5,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.voicekiosk.app.data.BoardModel
 import com.voicekiosk.app.data.TitleComponent
 import com.voicekiosk.app.media.MusicState
+import com.voicekiosk.app.media.MusicVisibilityPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -348,7 +349,7 @@ class MainPagerAdapterTest {
         val adapter = MainPagerAdapter(emptyList())
 
         fun computeShouldShowCard(state: MusicState?): Boolean {
-            return state != null && state.hasActiveSession && state.title.isNotEmpty()
+            return MusicVisibilityPolicy.shouldShowCard(state)
         }
 
         // 1. Initial State: no session
@@ -402,5 +403,41 @@ class MainPagerAdapterTest {
         adapter.onConfigurationChanged(portConfig)
         assertEquals(restoredPlaying, adapter.getMusicState())
         assertTrue("Active session state must be preserved across rotation back to portrait", computeShouldShowCard(adapter.getMusicState()))
+    }
+
+    @Test
+    fun testGuidanceCard_shownWhenNoNotificationAccessAndMediaPlaying() {
+        val adapter = MainPagerAdapter(emptyList())
+
+        // 1. No notification access, confirmed external playback, not suppressed -> card visible
+        val guidanceState = MusicState(
+            isPlaying = true,
+            title = "",
+            hasNotificationAccess = false,
+            hasActiveSession = false,
+            confirmedExternalPlayback = true,
+            isSuppressed = false
+        )
+        adapter.updateMusicState(guidanceState)
+        assertTrue(
+            "Guidance card must show when no notification access and external playback confirmed",
+            MusicVisibilityPolicy.shouldShowCard(adapter.getMusicState())
+        )
+
+        // 2. In dialogue -> guidance card hidden
+        val inDialogueState = guidanceState.copy(isSuppressed = true)
+        adapter.updateMusicState(inDialogueState)
+        assertFalse(
+            "Guidance card must be hidden during dialogue suppression",
+            MusicVisibilityPolicy.shouldShowCard(adapter.getMusicState())
+        )
+
+        // 3. Stopped -> guidance card hidden
+        val stoppedState = guidanceState.copy(isPlaying = false, confirmedExternalPlayback = false)
+        adapter.updateMusicState(stoppedState)
+        assertFalse(
+            "Guidance card must be hidden when playback stopped",
+            MusicVisibilityPolicy.shouldShowCard(adapter.getMusicState())
+        )
     }
 }

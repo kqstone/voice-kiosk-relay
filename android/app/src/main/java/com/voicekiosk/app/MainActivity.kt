@@ -901,9 +901,13 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     }
 
     override fun onStateChanged(state: String) {
-        if (state == VoiceKioskService.PipelineState.KWS_LISTENING.name) {
+        val isKws = (state == VoiceKioskService.PipelineState.KWS_LISTENING.name)
+        if (isKws) {
             mainHandler.removeCallbacks(resetWakeStateRunnable)
             mainHandler.postDelayed(resetWakeStateRunnable, WAKE_STATE_DURATION_MS)
+        }
+        if (::musicStateManager.isInitialized) {
+            musicStateManager.setSuppressFallback(!isKws)
         }
     }
 
