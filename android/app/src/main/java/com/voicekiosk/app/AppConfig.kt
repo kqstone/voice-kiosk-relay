@@ -89,6 +89,9 @@ object AppConfig {
     private const val KEY_WEATHER_CITY = "pref_weather_city"
     private const val KEY_WEATHER_LATITUDE = "pref_weather_latitude"
     private const val KEY_WEATHER_LONGITUDE = "pref_weather_longitude"
+    const val KEY_AUTO_LOCATION_ENABLED = "pref_auto_location_enabled"
+    const val DEFAULT_AUTO_LOCATION_ENABLED = true
+    const val KEY_LOCATION_PERMISSION_REQUESTED = "pref_location_permission_requested"
     private const val KEY_CACHED_WEATHER_SUMMARY = "pref_cached_weather_summary"
     const val KEY_CACHED_WEATHER_JSON = "pref_cached_weather_json"
     private const val KEY_LAST_WEATHER_FETCH_MS = "pref_last_weather_fetch_ms"
@@ -342,6 +345,34 @@ object AppConfig {
             .putFloat(KEY_WEATHER_LATITUDE, latitude)
             .putFloat(KEY_WEATHER_LONGITUDE, longitude)
             .apply()
+    }
+
+    fun isAutoLocationEnabled(context: Context): Boolean =
+        isAutoLocationEnabled(prefs(context))
+
+    fun isAutoLocationEnabled(prefs: SharedPreferences): Boolean =
+        prefs.getBoolean(KEY_AUTO_LOCATION_ENABLED, DEFAULT_AUTO_LOCATION_ENABLED)
+
+    fun setAutoLocationEnabled(context: Context, enabled: Boolean) {
+        setAutoLocationEnabled(prefs(context), enabled)
+    }
+
+    fun setAutoLocationEnabled(prefs: SharedPreferences, enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_LOCATION_ENABLED, enabled).apply()
+    }
+
+    fun isLocationPermissionRequested(context: Context): Boolean =
+        isLocationPermissionRequested(prefs(context))
+
+    fun isLocationPermissionRequested(prefs: SharedPreferences): Boolean =
+        prefs.getBoolean(KEY_LOCATION_PERMISSION_REQUESTED, false)
+
+    fun setLocationPermissionRequested(context: Context, requested: Boolean) {
+        setLocationPermissionRequested(prefs(context), requested)
+    }
+
+    fun setLocationPermissionRequested(prefs: SharedPreferences, requested: Boolean) {
+        prefs.edit().putBoolean(KEY_LOCATION_PERMISSION_REQUESTED, requested).apply()
     }
 
     fun getCachedWeatherSummary(context: Context): String =

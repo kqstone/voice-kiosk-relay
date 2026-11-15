@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -87,6 +88,30 @@ class AppConfigTest {
         } finally {
             AppConfig.prefsOverride = null
         }
+    }
+
+    @Test
+    fun testAutoLocationEnabled_defaultAndPersistence() {
+        val prefs = FakeSharedPreferences()
+        assertTrue(AppConfig.isAutoLocationEnabled(prefs))
+
+        AppConfig.setAutoLocationEnabled(prefs, false)
+        assertFalse(AppConfig.isAutoLocationEnabled(prefs))
+
+        AppConfig.setAutoLocationEnabled(prefs, true)
+        assertTrue(AppConfig.isAutoLocationEnabled(prefs))
+    }
+
+    @Test
+    fun testLocationPermissionRequested_defaultAndPersistence() {
+        val prefs = FakeSharedPreferences()
+        assertFalse(AppConfig.isLocationPermissionRequested(prefs))
+
+        AppConfig.setLocationPermissionRequested(prefs, true)
+        assertTrue(AppConfig.isLocationPermissionRequested(prefs))
+
+        AppConfig.setLocationPermissionRequested(prefs, false)
+        assertFalse(AppConfig.isLocationPermissionRequested(prefs))
     }
 
     @Test

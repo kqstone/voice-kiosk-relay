@@ -1,8 +1,10 @@
 package com.voicekiosk.app
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -27,6 +29,9 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.app.ActivityCompat
+import com.voicekiosk.app.location.LocationHelper
+import com.voicekiosk.app.ondevice.tools.CityTable
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -50,6 +55,7 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
 
     companion object {
         private const val TAG = "SettingsActivity"
+        private const val PERMISSION_REQUEST_LOCATION = 301
         private const val MIN_THRESHOLD = 0.10f
         private const val THRESHOLD_STEP = 0.05f
         private const val MAX_STEPS = 8 // 0.10 to 0.50 -> 8 steps of 0.05
@@ -66,6 +72,7 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
     private lateinit var thresholdValueText: TextView
 
     // Weather & Location
+    private lateinit var autoLocationCheckBox: CheckBox
     private var selectedWeatherCity: String = ""
     private var selectedWeatherLat: Float = AppConfig.DEFAULT_WEATHER_LATITUDE
     private var selectedWeatherLon: Float = AppConfig.DEFAULT_WEATHER_LONGITUDE
@@ -481,6 +488,29 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         }
         weatherCard.addView(weatherTitle)
 
+        autoLocationCheckBox = CheckBox(this).apply {
+            text = "启用自动粗略定位（按粗定位就近匹配城市，关闭时使用下方手动城市）"
+            setTextColor(Color.parseColor("#E5E7EB"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            isChecked = AppConfig.isAutoLocationEnabled(this@SettingsActivity)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(8)
+            }
+            layoutParams = lp
+            setOnCheckedChangeListener { _, isChecked ->
+                if (isChecked) {
+                    handleAutoLocationToggleEnabled()
+                } else {
+                    weatherStatusText.text = "已切换为手动城市：$selectedWeatherCity · 保存后生效"
+                    weatherStatusText.setTextColor(Color.parseColor("#9CA3AF"))
+                }
+            }
+        }
+        weatherCard.addView(autoLocationCheckBox)
+
         val cachedWeather = AppConfig.getCachedWeatherSummary(this)
         weatherStatusText = TextView(this).apply {
             val coordStr = String.format(Locale.US, "%.2f, %.2f", selectedWeatherLat, selectedWeatherLon)
@@ -530,6 +560,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
+                    if (::autoLocationCheckBox.isInitialized && autoLocationCheckBox.isChecked) {
+                        autoLocationCheckBox.isChecked = false
+                    }
                     selectedWeatherCity = city.name
                     selectedWeatherLat = city.latitude
                     selectedWeatherLon = city.longitude
@@ -636,6 +669,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
                     alpha = 1.0f
 
                     result.onSuccess { loc ->
+                        if (::autoLocationCheckBox.isInitialized && autoLocationCheckBox.isChecked) {
+                            autoLocationCheckBox.isChecked = false
+                        }
                         selectedWeatherCity = loc.name
                         selectedWeatherLat = loc.latitude
                         selectedWeatherLon = loc.longitude
@@ -1441,6 +1477,71 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         }
     }
 
+    private fun handleAutoLocationToggleEnabled() {
+        if (!LocationHelper.hasLocationPermission(this)) {
+            weatherStatusText.text = "正在请求定位权限..."
+            weatherStatusText.setTextColor(Color.parseColor("#FBBF24"))
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION),
+                PERMISSION_REQUEST_LOCATION
+            )
+            return
+        }
+        triggerCoarseLocationInSettings()
+    }
+
+    private fun triggerCoarseLocationInSettings() {
+        weatherStatusText.text = "正在通过网络获取粗略定位..."
+        weatherStatusText.setTextColor(Color.parseColor("#60A5FA"))
+        LocationHelper.requestCoarseLocation(this) { location ->
+            if (!isUiSafeForInteraction()) return@requestCoarseLocation
+            if (location != null) {
+                val nearest = CityTable.findNearest(location.latitude, location.longitude)
+                if (nearest != null) {
+                    selectedWeatherCity = nearest.name
+                    selectedWeatherLat = location.latitude.toFloat()
+                    selectedWeatherLon = location.longitude.toFloat()
+                    weatherCityEditText.setText(nearest.name)
+                    weatherCityEditText.setSelection(nearest.name.length)
+                    updateWeatherPresetChipHighlights(nearest.name)
+                    val coordStr = String.format(Locale.US, "%.2f, %.2f", selectedWeatherLat, selectedWeatherLon)
+                    weatherStatusText.text = "自动定位就近匹配：${nearest.name} ($coordStr) · 保存后生效"
+                    weatherStatusText.setTextColor(Color.parseColor("#10B981"))
+                    return@requestCoarseLocation
+                }
+            }
+            weatherStatusText.text = "自动定位超时或失败，已回退手动城市：$selectedWeatherCity"
+            weatherStatusText.setTextColor(Color.parseColor("#F59E0B"))
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == PERMISSION_REQUEST_LOCATION) {
+            val locIdx = permissions.indexOf(Manifest.permission.ACCESS_COARSE_LOCATION)
+            val granted = if (locIdx >= 0 && locIdx < grantResults.size) {
+                grantResults[locIdx] == PackageManager.PERMISSION_GRANTED
+            } else {
+                grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            }
+            if (granted) {
+                triggerCoarseLocationInSettings()
+            } else {
+                AppConfig.setLocationPermissionRequested(this, true)
+                if (::autoLocationCheckBox.isInitialized) {
+                    autoLocationCheckBox.isChecked = false
+                }
+                weatherStatusText.text = "定位权限被拒，已切换为手动城市：$selectedWeatherCity"
+                weatherStatusText.setTextColor(Color.parseColor("#F87171"))
+            }
+        }
+    }
+
     private fun handleSave() {
         val rawWord = wakeWordEditText.text.toString().trim().replace("\\s+".toRegex(), "")
 
@@ -1542,6 +1643,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         AppConfig.setNightModeDimAlpha(this, chosenNightDim)
 
         // Weather Location settings
+        if (::autoLocationCheckBox.isInitialized) {
+            AppConfig.setAutoLocationEnabled(this, autoLocationCheckBox.isChecked)
+        }
         val typedCity = weatherCityEditText.text.toString().trim()
         if (typedCity.isNotEmpty() && typedCity != selectedWeatherCity) {
             val preset = WeatherManager.findPresetCity(typedCity)

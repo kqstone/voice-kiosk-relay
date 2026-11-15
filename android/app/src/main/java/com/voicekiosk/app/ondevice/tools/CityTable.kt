@@ -35,6 +35,43 @@ object CityTable {
 
     private val byName = CITIES.associateBy { it.name }
 
+    private const val EARTH_RADIUS_METERS = 6371000.0
+
+    /**
+     * Great-circle distance between two coordinates in meters using the Haversine formula.
+     */
+    fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val rLat1 = Math.toRadians(lat1)
+        val rLat2 = Math.toRadians(lat2)
+        val a = Math.sin(dLat / 2).let { it * it } +
+                Math.cos(rLat1) * Math.cos(rLat2) *
+                Math.sin(dLon / 2).let { it * it }
+        val c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+        return EARTH_RADIUS_METERS * c
+    }
+
+    /**
+     * Great-circle distance between two coordinates in kilometers.
+     */
+    fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double =
+        distanceMeters(lat1, lon1, lat2, lon2) / 1000.0
+
+    /**
+     * Finds the nearest built-in city to the given coordinates by great-circle distance.
+     * Purely offline, zero-network, execution time < 0.1ms.
+     */
+    fun findNearest(lat: Double, lon: Double): City? {
+        if (CITIES.isEmpty()) return null
+        return CITIES.minByOrNull { city ->
+            distanceMeters(lat, lon, city.latitude, city.longitude)
+        }
+    }
+
+    fun findNearest(lat: Float, lon: Float): City? =
+        findNearest(lat.toDouble(), lon.toDouble())
+
     /** Exact built-in match, tolerating a trailing 市. */
     fun find(name: String): City? = byName[name.trim().removeSuffix("市")]
 
