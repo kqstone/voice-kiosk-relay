@@ -32,7 +32,9 @@ data class MusicState(
     val albumArtUri: Uri? = null,
     val appName: String = "",
     val hasNotificationAccess: Boolean = true,
-    val hasActiveSession: Boolean = false
+    val hasActiveSession: Boolean = false,
+    val confirmedExternalPlayback: Boolean = false,
+    val isSuppressed: Boolean = false
 ) {
     /**
      * Estimates the current playback position based on last updated position and elapsed realtime.

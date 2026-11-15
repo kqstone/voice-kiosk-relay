@@ -12,12 +12,13 @@ import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.media.ToneGenerator
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
+import com.voicekiosk.app.tts.TtsManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.k2fsa.sherpa.onnx.EndpointConfig
@@ -43,11 +44,15 @@ import com.voicekiosk.app.conversation.OpenApproval
 import com.voicekiosk.app.conversation.OpenQuestion
 import com.voicekiosk.app.conversation.QuestionAnswerMatcher
 import com.voicekiosk.app.conversation.QuestionMatch
+import com.voicekiosk.app.media.AudioFocusCoordinator
+import com.voicekiosk.app.media.MediaExecutedAction
+import com.voicekiosk.app.media.MusicStateManager
 import com.voicekiosk.app.ondevice.route.RouterModelHost
 import com.voicekiosk.app.ondevice.route.RuleRouter
 import com.voicekiosk.app.ondevice.route.TurnOrchestrator
 import com.voicekiosk.app.ondevice.tools.AndroidLocalPlatform
 import com.voicekiosk.app.ondevice.tools.LocalToolExecutor
+import com.voicekiosk.app.weather.WeatherRepository
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
@@ -56,6 +61,7 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 import kotlin.math.sqrt
@@ -73,10 +79,10 @@ import kotlin.math.sqrt
  *        to app private filesDir with SHA256 verification and dashboard progress reporting.
  * - Endpointing: Energy-based VAD (~1.2s silence below threshold after speech) or 8s max duration.
  * - Bridge Chat: POST JSON to /api/v1/chat (HttpURLConnection, 10s timeout, no redirects).
- * - TTS: Android system TextToSpeech (Locale.CHINA / zh-CN, device default TTS engine).
+ * - TTS: Managed via TtsManager (Locale.CHINA / zh-CN, candidate sequence).
  * - Offline / Error resilience: Shows clear offline notice on dashboard and never speaks a fake answer.
  */
-class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
+class VoiceKioskService : Service() {
 
     enum class PipelineState {
         KWS_LISTENING,
@@ -104,11 +110,28 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         const val ACTION_STOP = "com.voicekiosk.app.action.STOP"
         const val ACTION_META_HANDSHAKE = "com.voicekiosk.app.action.META_HANDSHAKE"
         const val ACTION_SIMULATE_UTTERANCE = "com.voicekiosk.app.action.SIMULATE_UTTERANCE"
+        const val ACTION_TRIGGER_WAKE = "com.voicekiosk.app.action.TRIGGER_WAKE"
         const val EXTRA_UTTERANCE_TEXT = "com.voicekiosk.app.extra.UTTERANCE_TEXT"
         const val HOST_SPEAK_MAX_CHARS = 200
 
         @Volatile
         private var instance: VoiceKioskService? = null
+
+        fun triggerWake(context: Context) {
+            val inst = instance
+            if (inst != null) {
+                inst.triggerWakeInternal()
+            } else {
+                val intent = Intent(context, VoiceKioskService::class.java).apply {
+                    action = ACTION_TRIGGER_WAKE
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            }
+        }
 
         fun simulateUserUtterance(text: String) {
             val inst = instance
@@ -224,15 +247,39 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
                 start(appContext)
             }, 500L)
         }
+
+        fun isInDialogue(): Boolean {
+            val inst = instance ?: return false
+            return inst.pipelineState != PipelineState.KWS_LISTENING
+        }
+    }
+
+    private fun setPipelineState(newState: PipelineState) {
+        pipelineState = newState
+        WakeWordEventBus.emitStateChanged(newState.name)
+        try {
+            val suppress = (newState != PipelineState.KWS_LISTENING)
+            MusicStateManager.getInstance(applicationContext).setSuppressFallback(suppress)
+        } catch (_: Throwable) {}
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
     private var toneGenerator: ToneGenerator? = null
 
-    private var tts: TextToSpeech? = null
-    @Volatile
-    private var isTtsReady = false
+    private lateinit var ttsManager: TtsManager
+    private lateinit var audioFocusCoordinator: AudioFocusCoordinator
+    private var echoCanceler: AcousticEchoCanceler? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
+    private val uiWakeRequested = AtomicBoolean(false)
+
+    fun triggerWakeInternal() {
+        Log.i(TAG, "UI wake triggered")
+        uiWakeRequested.set(true)
+        if (!isRecording) {
+            startVoicePipeline()
+        }
+    }
 
     private var kws: KeywordSpotter? = null
     private var kwsStream: OnlineStream? = null
@@ -276,6 +323,7 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         Log.i(TAG, "Initializing VoiceKioskService...")
         instance = this
 
+        audioFocusCoordinator = AudioFocusCoordinator(applicationContext)
         acquireLocks()
         initToneGenerator()
         initTts()
@@ -285,6 +333,9 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            ACTION_TRIGGER_WAKE -> {
+                triggerWakeInternal()
+            }
             ACTION_STOP -> {
                 Log.i(TAG, "Stopping service via ACTION_STOP")
                 stopRecording()
@@ -329,99 +380,33 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         super.onDestroy()
     }
 
-    // --- TextToSpeech Initialization ---
+    // --- TextToSpeech Initialization & Delegation ---
 
     private fun initTts() {
-        try {
-            tts = TextToSpeech(applicationContext, this)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize TextToSpeech", e)
-        }
-    }
-
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            val engine = tts ?: return
-            val res = engine.setLanguage(Locale.CHINA)
-            if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
-                val fallbackRes = engine.setLanguage(Locale.SIMPLIFIED_CHINESE)
-                if (fallbackRes == TextToSpeech.LANG_MISSING_DATA || fallbackRes == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    Log.w(TAG, "zh-CN locale not supported by system TTS engine (code=$res)")
-                } else {
-                    isTtsReady = true
-                    Log.i(TAG, "TTS initialized with SIMPLIFIED_CHINESE")
-                }
-            } else {
-                isTtsReady = true
-                Log.i(TAG, "TTS initialized with zh-CN")
-            }
-        } else {
-            Log.e(TAG, "TextToSpeech onInit failed with status: $status")
-        }
+        ttsManager = TtsManager.getInstance(applicationContext)
+        ttsManager.init()
     }
 
     private fun releaseTts() {
-        try {
-            tts?.stop()
-            tts?.shutdown()
-            tts = null
-            isTtsReady = false
-        } catch (e: Exception) {
-            Log.e(TAG, "Error releasing TextToSpeech", e)
+        if (::ttsManager.isInitialized) {
+            ttsManager.release()
         }
     }
 
     private fun speakBlocking(text: String) {
-        val engine = tts
-        if (!isTtsReady || engine == null || text.isBlank()) {
-            Log.w(TAG, "TTS not ready or empty text, skipping speech playback")
-            return
-        }
-
-        val utteranceId = "vk_${UUID.randomUUID()}"
-        val latch = CountDownLatch(1)
-
-        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(id: String?) {
-                Log.i(TAG, "TTS started speaking ($id)")
-            }
-
-            override fun onDone(id: String?) {
-                Log.i(TAG, "TTS finished speaking ($id)")
-                latch.countDown()
-            }
-
-            @Deprecated("Deprecated in Java")
-            override fun onError(id: String?) {
-                Log.w(TAG, "TTS error ($id)")
-                latch.countDown()
-            }
-
-            override fun onError(id: String?, errorCode: Int) {
-                Log.w(TAG, "TTS error ($id, code=$errorCode)")
-                latch.countDown()
-            }
-        })
-
-        val speakResult = engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-        if (speakResult == TextToSpeech.ERROR) {
-            Log.e(TAG, "TTS speak() returned ERROR")
-            return
-        }
-
-        // Wait up to 20s for utterance playback to finish before re-arming KWS
-        try {
-            latch.await(20, TimeUnit.SECONDS)
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
+        if (::ttsManager.isInitialized) {
+            ttsManager.speakBlocking(text)
         }
     }
 
-    /** Non-blocking TTS for the WebView VoiceKioskHost.speak hook. */
+    /** Non-blocking TTS for the WebView VoiceKioskHost.speak hook. Ducks background media. */
     private fun speakNonBlocking(text: String) {
-        val engine = tts
-        if (!isTtsReady || engine == null || text.isBlank()) return
-        engine.speak(text, TextToSpeech.QUEUE_ADD, null, "vk_host_${UUID.randomUUID()}")
+        if (::ttsManager.isInitialized) {
+            val estDurationMs = (text.length * 350L + 2000L).coerceIn(2000L, 20000L)
+            audioFocusCoordinator.duckSpeech(estDurationMs) {
+                ttsManager.speakNonBlocking(text)
+            }
+        }
     }
 
     // --- Foreground Service & Locks ---
@@ -564,11 +549,10 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
 
         setupOnDeviceRouting()
 
-        pipelineState = PipelineState.KWS_LISTENING
+        setPipelineState(PipelineState.KWS_LISTENING)
         isRecording = true
         audioRecord?.startRecording()
         WakeWordEventBus.emitStatus(true, "正在监听：${AppConfig.getWakeWord(this)}")
-        WakeWordEventBus.emitStateChanged(pipelineState.name)
 
         recordingThread = thread(name = "VoiceKiosk-AudioThread", isDaemon = true) {
             processAudioLoop()
@@ -698,8 +682,14 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         )
         val bufferSize = maxOf(minBufferSize, AppConfig.AUDIO_SAMPLE_RATE / 5 * 2)
 
+        val audioSource = if (AppConfig.isExperimentalAecNsEnabled(applicationContext)) {
+            MediaRecorder.AudioSource.VOICE_RECOGNITION
+        } else {
+            MediaRecorder.AudioSource.MIC
+        }
+
         audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
+            audioSource,
             AppConfig.AUDIO_SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
@@ -708,6 +698,32 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
 
         if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
             throw IllegalStateException("AudioRecord failed to initialize (state != STATE_INITIALIZED)")
+        }
+
+        if (AppConfig.isExperimentalAecNsEnabled(applicationContext)) {
+            val sessionId = audioRecord?.audioSessionId ?: 0
+            if (sessionId != 0) {
+                if (AcousticEchoCanceler.isAvailable()) {
+                    try {
+                        echoCanceler = AcousticEchoCanceler.create(sessionId)?.apply {
+                            enabled = true
+                        }
+                        Log.i(TAG, "AcousticEchoCanceler enabled on session $sessionId")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to enable AcousticEchoCanceler: ${e.message}")
+                    }
+                }
+                if (NoiseSuppressor.isAvailable()) {
+                    try {
+                        noiseSuppressor = NoiseSuppressor.create(sessionId)?.apply {
+                            enabled = true
+                        }
+                        Log.i(TAG, "NoiseSuppressor enabled on session $sessionId")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to enable NoiseSuppressor: ${e.message}")
+                    }
+                }
+            }
         }
     }
 
@@ -736,37 +752,54 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
 
             // State: KWS_LISTENING
             currentStream.acceptWaveform(floatSamples, sampleRate)
+            var wakeTriggered = false
+            var detectedKeyword = ""
             while (currentKws.isReady(currentStream)) {
                 currentKws.decode(currentStream)
                 val result = currentKws.getResult(currentStream)
                 if (result.keyword.isNotBlank()) {
-                    val detectedKeyword = result.keyword
-                    Log.i(TAG, "Wake word triggered: '$detectedKeyword'")
-                    currentKws.reset(currentStream)
-
-                    // 1. On wake: beep + banner
-                    playPromptBeep()
-                    WakeWordEventBus.emitWakeWord(detectedKeyword)
-
-                    // Brief pause (180ms) so the beep itself is not captured into ASR
-                    drainAudioSamples(record, shortBuffer, 180L)
-
-                    // 2. Enter continuous multi-turn conversation session
-                    routerModel?.cancelExclusive()
-                    val sessionStartSeq = orchestrator?.context?.turns()?.lastOrNull()?.seq ?: 0L
-                    runConversationSession(record, shortBuffer, sampleRate)
-                    // S5: memory extraction runs after the session, in the background
-                    orchestrator?.let { o ->
-                        memoryManager?.onSessionEnded(o.context.turns().filter { it.seq > sessionStartSeq }.map { it.userText })
-                    }
-
-                    // 3. Re-arm KWS_LISTENING
-                    currentKws.reset(currentStream)
-                    pipelineState = PipelineState.KWS_LISTENING
-                    WakeWordEventBus.emitStateChanged(pipelineState.name)
-                    Log.i(TAG, "Re-armed KWS_LISTENING")
+                    wakeTriggered = true
+                    detectedKeyword = result.keyword
                     break
                 }
+            }
+
+            if (!wakeTriggered && uiWakeRequested.getAndSet(false)) {
+                wakeTriggered = true
+                detectedKeyword = AppConfig.getWakeWord(this)
+            }
+
+            if (wakeTriggered) {
+                Log.i(TAG, "Wake triggered: '$detectedKeyword'")
+                currentKws.reset(currentStream)
+
+                // 1. Audio Focus & proactive pause preparation BEFORE beep
+                audioFocusCoordinator.onWakeRequested()
+
+                // 2. Play prompt beep + emit wake banner
+                playPromptBeep()
+                WakeWordEventBus.emitWakeWord(detectedKeyword)
+
+                // 3. Drain audio while waiting for music fadeout (up to 500ms, proactive pause at 300ms)
+                drainAudioOnWake(record, shortBuffer)
+
+                // 4. Enter continuous multi-turn conversation session
+                routerModel?.cancelExclusive()
+                val sessionStartSeq = orchestrator?.context?.turns()?.lastOrNull()?.seq ?: 0L
+                runConversationSession(record, shortBuffer, sampleRate)
+                // S5: memory extraction runs after the session, in the background
+                orchestrator?.let { o ->
+                    memoryManager?.onSessionEnded(o.context.turns().filter { it.seq > sessionStartSeq }.map { it.userText })
+                }
+
+                // 5. Session ended: abandon audio focus and resume music if paused by us
+                audioFocusCoordinator.onSessionEnded()
+
+                // 6. Re-arm KWS_LISTENING
+                currentKws.reset(currentStream)
+                setPipelineState(PipelineState.KWS_LISTENING)
+                Log.i(TAG, "Re-armed KWS_LISTENING")
+                break
             }
         }
 
@@ -790,6 +823,7 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         // Otherwise (KWS listening or idle), run through the turn orchestrator on a daemon thread
         thread(name = "VoiceKiosk-SimulatedUtterance", isDaemon = true) {
             try {
+                audioFocusCoordinator.onWakeRequested()
                 routerModel?.cancelExclusive()
                 WakeWordEventBus.emitWakeWord("模拟指令")
                 WakeWordEventBus.emitAsrFinalResult(trimmed)
@@ -797,9 +831,46 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing simulated utterance", e)
             } finally {
-                pipelineState = PipelineState.KWS_LISTENING
-                WakeWordEventBus.emitStateChanged(pipelineState.name)
+                audioFocusCoordinator.onSessionEnded()
+                setPipelineState(PipelineState.KWS_LISTENING)
             }
+        }
+    }
+
+    private fun drainAudioOnWake(record: AudioRecord?, buffer: ShortArray?) {
+        val start = System.currentTimeMillis()
+        val minDrainMs = AppConfig.AUDIO_DRAIN_DEFAULT_MS
+        val maxDrainMs = if (audioFocusCoordinator.wasPlayingBeforeWake()) {
+            AppConfig.AUDIO_DRAIN_MUSIC_FADEOUT_MAX_MS
+        } else {
+            minDrainMs
+        }
+
+        var proactivePauseChecked = false
+        while (isRecording && (System.currentTimeMillis() - start) < maxDrainMs) {
+            if (record != null && buffer != null) {
+                record.read(buffer, 0, buffer.size)
+            } else {
+                try {
+                    Thread.sleep(50L)
+                } catch (_: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    break
+                }
+            }
+            val elapsed = System.currentTimeMillis() - start
+            if (!proactivePauseChecked && elapsed >= AppConfig.AUDIO_PROACTIVE_PAUSE_DELAY_MS) {
+                audioFocusCoordinator.checkAndPerformProactivePause()
+                proactivePauseChecked = true
+            }
+            if (elapsed >= minDrainMs) {
+                if (!audioFocusCoordinator.wasPlayingBeforeWake() || !audioFocusCoordinator.isMusicActive()) {
+                    break
+                }
+            }
+        }
+        if (!proactivePauseChecked) {
+            audioFocusCoordinator.checkAndPerformProactivePause()
         }
     }
 
@@ -847,12 +918,16 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
 
             if (outcome != TurnOutcome.ANSWERED) {
                 if (outcome == TurnOutcome.SILENCE && isFollowUp) {
-                    pipelineState = PipelineState.SPEAKING
-                    WakeWordEventBus.emitStateChanged(pipelineState.name)
+                    setPipelineState(PipelineState.SPEAKING)
                     speakBlocking(SESSION_SILENCE_PROMPT)
                     drainAudioSamples(record, shortBuffer, 150L)
                 }
                 Log.i(TAG, "Conversation session ended on turn ${turnCount + 1} with outcome=$outcome")
+                return
+            }
+
+            if (audioFocusCoordinator.shouldEndSessionAfterTurn()) {
+                Log.i(TAG, "Conversation session ended after media play turn without follow-up")
                 return
             }
 
@@ -867,8 +942,7 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         noSpeechTimeoutMs: Long,
         isFollowUp: Boolean
     ): TurnOutcome {
-        pipelineState = PipelineState.ASR_LISTENING
-        WakeWordEventBus.emitStateChanged(pipelineState.name)
+        setPipelineState(PipelineState.ASR_LISTENING)
 
         // Ensure ASR recognizer is ready (if download finished or needs retry)
         if (!isAsrReady) {
@@ -1026,8 +1100,7 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         shortBuffer: ShortArray?,
         recognizedText: String
     ): TurnOutcome {
-        pipelineState = PipelineState.SPEAKING
-        WakeWordEventBus.emitStateChanged(pipelineState.name)
+        setPipelineState(PipelineState.SPEAKING)
 
         orchestrator?.let { return orchestratedTurn(it, record, shortBuffer, recognizedText) }
 
@@ -1103,7 +1176,14 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
                 tools = LocalToolExecutor(
                     platform,
                     favoriteArtist = { memoryManager?.favoriteArtist() },
-                    weather = if (AppConfig.isOnDeviceWeatherEnabled(applicationContext)) com.voicekiosk.app.ondevice.tools.OpenMeteoWeatherSource() else null,
+                    weather = if (AppConfig.isOnDeviceWeatherEnabled(applicationContext)) com.voicekiosk.app.ondevice.tools.OpenMeteoWeatherSource(weatherRepo = WeatherRepository) else null,
+                    weatherRepo = WeatherRepository,
+                    onMediaActionExecuted = { executed ->
+                        when (executed) {
+                            MediaExecutedAction.PAUSE -> audioFocusCoordinator.onUserPauseCommand()
+                            MediaExecutedAction.PLAY -> audioFocusCoordinator.onUserPlayCommand()
+                        }
+                    },
                     defaultCity = {
                         val name = AppConfig.getWeatherCity(applicationContext)
                         com.voicekiosk.app.ondevice.tools.City(
@@ -1275,8 +1355,7 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         drainAudioSamples(record, shortBuffer, 150L)
 
         Log.i(TAG, "Entering waiting state for Muse conversation_id=$conversationId")
-        pipelineState = PipelineState.WAITING
-        WakeWordEventBus.emitStateChanged(pipelineState.name)
+        setPipelineState(PipelineState.WAITING)
         val waitingText = "等待 Muse 回复中"
         WakeWordEventBus.emitWaitingForMuse(waitingText)
         WakeWordEventBus.emitChatReply(waitingText)
@@ -1336,8 +1415,7 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
 
         val toSpeak = finalReply ?: ConversationPoller.FALLBACK_TIMEOUT_REPLY
         orchestrator?.context?.updateLastReply(toSpeak)
-        pipelineState = PipelineState.SPEAKING
-        WakeWordEventBus.emitStateChanged(pipelineState.name)
+        setPipelineState(PipelineState.SPEAKING)
         WakeWordEventBus.emitChatReply(toSpeak)
         speakBlocking(toSpeak)
         drainAudioSamples(record, shortBuffer, 150L)
@@ -1354,9 +1432,11 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         val text = if (label != null) "时间到了，提醒你：$label。" else "计时${LocalToolExecutor.spokenDuration(seconds)}到了。"
         WakeWordEventBus.emitChatReply("⏰ $text")
         playPromptBeep()
-        val engine = tts
-        if (isTtsReady && engine != null) {
-            engine.speak(text, TextToSpeech.QUEUE_ADD, null, "vk_timer_${UUID.randomUUID()}")
+        if (::ttsManager.isInitialized) {
+            val estDurationMs = (text.length * 350L + 2000L).coerceIn(2000L, 20000L)
+            audioFocusCoordinator.duckSpeech(estDurationMs) {
+                ttsManager.speakNonBlocking(text, "vk_timer_${UUID.randomUUID()}")
+            }
         }
     }
 
@@ -1517,6 +1597,20 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
             Log.e(TAG, "Error stopping AudioRecord", e)
         }
         audioRecord = null
+
+        try {
+            echoCanceler?.release()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing AcousticEchoCanceler", e)
+        }
+        echoCanceler = null
+
+        try {
+            noiseSuppressor?.release()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error releasing NoiseSuppressor", e)
+        }
+        noiseSuppressor = null
 
         try {
             kwsStream?.release()

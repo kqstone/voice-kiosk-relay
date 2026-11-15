@@ -5,12 +5,15 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.AudioPlaybackConfiguration
 import android.media.MediaMetadata
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -34,6 +37,19 @@ class MusicStateManager(private val context: Context) {
     companion object {
         private const val TAG = "MusicStateManager"
         private const val FALLBACK_POLL_INTERVAL_MS = 2000L // 2s poll for audioManager.isMusicActive
+
+        @Volatile
+        private var instance: MusicStateManager? = null
+
+        fun getInstance(context: Context): MusicStateManager {
+            return instance ?: synchronized(this) {
+                instance ?: MusicStateManager(context.applicationContext).also { instance = it }
+            }
+        }
+    }
+
+    init {
+        if (instance == null) instance = this
     }
 
     interface Listener {
@@ -51,6 +67,14 @@ class MusicStateManager(private val context: Context) {
     private var currentMusicState = MusicState()
     private var isStarted = false
     private var hasAutoRoutedNotificationSettings = false
+
+    private val fallbackDetector = FallbackDetector(
+        requiredConsecutiveSamples = 2,
+        cooldownDurationMs = 3000L,
+        timeProvider = { SystemClock.elapsedRealtime() }
+    )
+    private var audioPlaybackCallback: AudioManager.AudioPlaybackCallback? = null
+    private var isFallbackSuppressed = false
 
     // Periodic fallback poller
     private val fallbackPollRunnable = object : Runnable {
@@ -102,6 +126,24 @@ class MusicStateManager(private val context: Context) {
             }
         }
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val callback = object : AudioManager.AudioPlaybackCallback() {
+                override fun onPlaybackConfigChanged(configs: List<AudioPlaybackConfiguration>?) {
+                    mainHandler.post {
+                        if (isStarted) {
+                            evaluateAudioState()
+                        }
+                    }
+                }
+            }
+            audioPlaybackCallback = callback
+            try {
+                audioManager.registerAudioPlaybackCallback(callback, mainHandler)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to register audio playback callback: ${e.message}")
+            }
+        }
+
         refreshSessions()
         mainHandler.post(fallbackPollRunnable)
     }
@@ -109,10 +151,30 @@ class MusicStateManager(private val context: Context) {
     fun stop() {
         isStarted = false
         mainHandler.removeCallbacksAndMessages(null)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && audioPlaybackCallback != null) {
+            try {
+                audioManager.unregisterAudioPlaybackCallback(audioPlaybackCallback!!)
+            } catch (_: Exception) {}
+            audioPlaybackCallback = null
+        }
         detachCurrentController()
         unregisterSessionListener()
         MediaNotificationListenerService.setConnectionListener(null)
     }
+
+    fun setSuppressFallback(suppressed: Boolean) {
+        val now = SystemClock.elapsedRealtime()
+        if (isFallbackSuppressed && !suppressed) {
+            fallbackDetector.onTtsFinished(now)
+        }
+        isFallbackSuppressed = suppressed
+        fallbackDetector.setSuppressed(suppressed, now)
+        if (suppressed && activeController == null) {
+            evaluateAudioState()
+        }
+    }
+
+    fun isFallbackSuppressed(): Boolean = fallbackDetector.isSuppressionActive(SystemClock.elapsedRealtime())
 
     fun checkAndUpdateState() {
         if (!isStarted) return
@@ -167,7 +229,8 @@ class MusicStateManager(private val context: Context) {
     }
 
     private fun handleActiveSessionsChanged(controllers: List<MediaController>?) {
-        val list = controllers ?: emptyList()
+        val myPackage = context.packageName
+        val list = (controllers ?: emptyList()).filter { it.packageName != myPackage }
         val targetController = list.firstOrNull { isPlayingState(it.playbackState?.state) }
             ?: list.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PAUSED }
             ?: list.firstOrNull()
@@ -176,6 +239,7 @@ class MusicStateManager(private val context: Context) {
             if (activeController?.sessionToken != targetController.sessionToken) {
                 detachCurrentController()
                 activeController = targetController
+                fallbackDetector.reset()
                 try {
                     targetController.registerCallback(controllerCallback, mainHandler)
                 } catch (e: Exception) {
@@ -192,11 +256,14 @@ class MusicStateManager(private val context: Context) {
     private fun handleSessionDestroyed() {
         Log.i(TAG, "Active media session destroyed mid-playback; handling session disappearance")
         detachCurrentController()
-        // If system audio is still active, transition to fallback; otherwise begin stop timer
-        if (audioManager.isMusicActive) {
+        if (checkRawMediaActive()) {
             evaluateAudioState()
         } else {
-            val stoppedState = currentMusicState.copy(isPlaying = false, hasActiveSession = false)
+            val stoppedState = currentMusicState.copy(
+                isPlaying = false,
+                hasActiveSession = false,
+                confirmedExternalPlayback = false
+            )
             updateMusicState(stoppedState)
         }
     }
@@ -280,19 +347,58 @@ class MusicStateManager(private val context: Context) {
             albumArtUri = artUri,
             appName = appName,
             hasNotificationAccess = true,
-            hasActiveSession = true
+            hasActiveSession = true,
+            confirmedExternalPlayback = false,
+            isSuppressed = fallbackDetector.isSuppressionActive(SystemClock.elapsedRealtime())
         )
 
         updateMusicState(newState)
+    }
+
+    /**
+     * Checks if third-party media is actively playing using AudioManager.getActivePlaybackConfigurations (API 26+)
+     * filtered strictly to USAGE_MEDIA and USAGE_GAME, excluding our own application UID.
+     * Falls back to AudioManager.isMusicActive on older APIs or when configuration query is unavailable.
+     */
+    fun checkRawMediaActive(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                val configs = audioManager.activePlaybackConfigurations
+                if (configs != null) {
+                    val myUid = context.applicationInfo.uid
+                    return configs.any { config ->
+                        val attrs = config.audioAttributes
+                        val usage = attrs?.usage ?: AudioAttributes.USAGE_UNKNOWN
+                        val isMediaOrGame = usage == AudioAttributes.USAGE_MEDIA || usage == AudioAttributes.USAGE_GAME
+                        if (!isMediaOrGame) return@any false
+
+                        val isOurApp = try {
+                            val uidMethod = config.javaClass.getMethod("getClientUid")
+                            val uid = uidMethod.invoke(config) as? Int
+                            uid == myUid
+                        } catch (_: Throwable) {
+                            false
+                        }
+                        !isOurApp
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to inspect active playback configurations: ${e.message}")
+            }
+        }
+        return audioManager.isMusicActive
     }
 
     private fun evaluateAudioState() {
         if (activeController != null) return
 
         val hasAccess = MediaNotificationListenerService.isNotificationAccessGranted(context)
-        val isMusicActive = audioManager.isMusicActive
+        val rawDetected = checkRawMediaActive()
+        val nowMs = SystemClock.elapsedRealtime()
+        val debouncedPlaying = fallbackDetector.evaluateSample(rawDetected, nowMs)
+        val isSuppressed = fallbackDetector.isSuppressionActive(nowMs)
 
-        if (isMusicActive) {
+        if (debouncedPlaying) {
             // If notification access is not granted, route user to notification-access settings screen
             if (!hasAccess && !hasAutoRoutedNotificationSettings) {
                 hasAutoRoutedNotificationSettings = true
@@ -306,18 +412,25 @@ class MusicStateManager(private val context: Context) {
                 album = "",
                 durationMs = 0L,
                 positionMs = 0L,
-                lastPositionUpdateTime = SystemClock.elapsedRealtime(),
+                lastPositionUpdateTime = nowMs,
                 playbackSpeed = 1.0f,
                 albumArt = null,
                 albumArtUri = null,
                 appName = "",
                 hasNotificationAccess = hasAccess,
-                hasActiveSession = false
+                hasActiveSession = false,
+                confirmedExternalPlayback = true,
+                isSuppressed = isSuppressed
             )
             updateMusicState(fallbackState)
         } else {
-            if (currentMusicState.isPlaying) {
-                val stoppedState = currentMusicState.copy(isPlaying = false)
+            if (currentMusicState.isPlaying || currentMusicState.confirmedExternalPlayback) {
+                val stoppedState = currentMusicState.copy(
+                    isPlaying = false,
+                    hasActiveSession = false,
+                    confirmedExternalPlayback = false,
+                    isSuppressed = isSuppressed
+                )
                 updateMusicState(stoppedState)
             }
         }
@@ -326,6 +439,44 @@ class MusicStateManager(private val context: Context) {
     private fun updateMusicState(newState: MusicState) {
         currentMusicState = newState
         listener?.onMusicStateUpdated(currentMusicState)
+    }
+
+    fun isMusicActive(): Boolean {
+        val ctrlPlaying = activeController?.playbackState?.let { isPlayingState(it.state) } ?: false
+        val rawMedia = checkRawMediaActive() && !fallbackDetector.isSuppressionActive(SystemClock.elapsedRealtime())
+        return currentMusicState.isPlaying || ctrlPlaying || rawMedia
+    }
+
+    /**
+     * Proactively pauses media playback via transportControls.pause, falling back to KEYCODE_MEDIA_PAUSE.
+     */
+    fun pause() {
+        val controller = activeController
+        if (controller != null) {
+            try {
+                controller.transportControls.pause()
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "Transport pause failed, falling back to key event: ${e.message}")
+            }
+        }
+        dispatchMediaKeyEvent(KeyEvent.KEYCODE_MEDIA_PAUSE)
+    }
+
+    /**
+     * Resumes media playback via transportControls.play, falling back to KEYCODE_MEDIA_PLAY.
+     */
+    fun play() {
+        val controller = activeController
+        if (controller != null) {
+            try {
+                controller.transportControls.play()
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "Transport play failed, falling back to key event: ${e.message}")
+            }
+        }
+        dispatchMediaKeyEvent(KeyEvent.KEYCODE_MEDIA_PLAY)
     }
 
     /**

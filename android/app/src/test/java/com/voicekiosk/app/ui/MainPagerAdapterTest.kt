@@ -5,8 +5,11 @@ import androidx.recyclerview.widget.RecyclerView
 import com.voicekiosk.app.data.BoardModel
 import com.voicekiosk.app.data.TitleComponent
 import com.voicekiosk.app.media.MusicState
+import com.voicekiosk.app.media.MusicVisibilityPolicy
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -85,12 +88,13 @@ class MainPagerAdapterTest {
         // 1. Initial state: no playback
         assertEquals(4, adapter.itemCount)
 
-        // 2. Playback starts
+        // 2. Playback starts with active session
         val playingState = MusicState(
             isPlaying = true,
             title = "夜曲",
             artist = "周杰伦",
-            appName = "网易云音乐"
+            appName = "网易云音乐",
+            hasActiveSession = true
         )
         adapter.updateMusicState(playingState)
         assertEquals(
@@ -102,7 +106,8 @@ class MainPagerAdapterTest {
         // 3. Playback updates with progress/metadata
         val updatedState = playingState.copy(
             positionMs = 30000L,
-            durationMs = 240000L
+            durationMs = 240000L,
+            hasActiveSession = true
         )
         adapter.updateMusicState(updatedState)
         assertEquals(
@@ -111,23 +116,25 @@ class MainPagerAdapterTest {
             adapter.itemCount
         )
 
-        // 4. Playback paused
-        val pausedState = updatedState.copy(isPlaying = false)
+        // 4. Playback paused: hasActiveSession remains true
+        val pausedState = updatedState.copy(isPlaying = false, hasActiveSession = true)
         adapter.updateMusicState(pausedState)
         assertEquals(
             "Page count must not change when music pauses",
             4,
             adapter.itemCount
         )
+        assertEquals(true, adapter.getMusicState()?.hasActiveSession)
 
         // 5. Playback stops / session destroyed
-        val stoppedState = MusicState(isPlaying = false)
+        val stoppedState = MusicState(isPlaying = false, hasActiveSession = false)
         adapter.updateMusicState(stoppedState)
         assertEquals(
             "Page count must not change when music stops",
             4,
             adapter.itemCount
         )
+        assertEquals(false, adapter.getMusicState()?.hasActiveSession)
     }
 
     @Test
@@ -144,20 +151,20 @@ class MainPagerAdapterTest {
         assertEquals(2, adapter.getBoardPagePosition("b2"))
         assertEquals(3, adapter.getBoardPagePosition("b3"))
 
-        // Assert positions while playing
-        adapter.updateMusicState(MusicState(isPlaying = true, title = "晴天", artist = "周杰伦"))
+        // Assert positions while playing (active session)
+        adapter.updateMusicState(MusicState(isPlaying = true, title = "晴天", artist = "周杰伦", hasActiveSession = true))
         assertEquals(1, adapter.getBoardPagePosition("b1"))
         assertEquals(2, adapter.getBoardPagePosition("b2"))
         assertEquals(3, adapter.getBoardPagePosition("b3"))
 
-        // Assert positions while paused
-        adapter.updateMusicState(MusicState(isPlaying = false, title = "晴天", artist = "周杰伦"))
+        // Assert positions while paused (active session retained)
+        adapter.updateMusicState(MusicState(isPlaying = false, title = "晴天", artist = "周杰伦", hasActiveSession = true))
         assertEquals(1, adapter.getBoardPagePosition("b1"))
         assertEquals(2, adapter.getBoardPagePosition("b2"))
         assertEquals(3, adapter.getBoardPagePosition("b3"))
 
-        // Assert positions after stopping
-        adapter.updateMusicState(MusicState(isPlaying = false))
+        // Assert positions after stopping (session ended)
+        adapter.updateMusicState(MusicState(isPlaying = false, hasActiveSession = false))
         assertEquals(1, adapter.getBoardPagePosition("b1"))
         assertEquals(2, adapter.getBoardPagePosition("b2"))
         assertEquals(3, adapter.getBoardPagePosition("b3"))
@@ -335,5 +342,102 @@ class MainPagerAdapterTest {
         assertEquals(1, adapter.itemCount)
         assertEquals(MainPagerAdapter.VIEW_TYPE_HOME, adapter.getItemViewType(0))
         assertEquals(0L, adapter.getItemId(0))
+    }
+
+    @Test
+    fun testMusicStateActiveSession_drivesVisibilityLogic_andAntiJumpOnPause() {
+        val adapter = MainPagerAdapter(emptyList())
+
+        fun computeShouldShowCard(state: MusicState?): Boolean {
+            return MusicVisibilityPolicy.shouldShowCard(state)
+        }
+
+        // 1. Initial State: no session
+        assertEquals(null, adapter.getMusicState())
+        assertFalse("Should not show card when state is null", computeShouldShowCard(adapter.getMusicState()))
+
+        // 2. Playback starts: active session with track title
+        val activePlaying = MusicState(
+            isPlaying = true,
+            title = "稻香",
+            artist = "周杰伦",
+            appName = "网易云音乐",
+            hasActiveSession = true
+        )
+        adapter.updateMusicState(activePlaying)
+        assertEquals(activePlaying, adapter.getMusicState())
+        assertTrue("Card must be shown when active session has valid title", computeShouldShowCard(adapter.getMusicState()))
+
+        // 3. Playback paused: isPlaying = false, but hasActiveSession = true
+        // Zero-Jump invariant: Card remains visible during pause, does not bounce back to large weather
+        val activePaused = activePlaying.copy(isPlaying = false)
+        adapter.updateMusicState(activePaused)
+        assertEquals(activePaused, adapter.getMusicState())
+        assertTrue("Card must STAY VISIBLE when paused with active session (Zero-Jump)", computeShouldShowCard(adapter.getMusicState()))
+
+        // 4. Track title becomes empty: card must not show even if hasActiveSession is true
+        val emptyTitleSession = activePlaying.copy(title = "")
+        adapter.updateMusicState(emptyTitleSession)
+        assertFalse("Card must not show when track title is empty", computeShouldShowCard(adapter.getMusicState()))
+
+        // 5. Session terminated / destroyed: hasActiveSession = false
+        val sessionEnded = activePaused.copy(hasActiveSession = false)
+        adapter.updateMusicState(sessionEnded)
+        assertFalse("Card must hide when session is terminated", computeShouldShowCard(adapter.getMusicState()))
+
+        // 6. Orientation change preserves active session and visibility invariant
+        val restoredPlaying = activePlaying.copy()
+        adapter.updateMusicState(restoredPlaying)
+        assertTrue(computeShouldShowCard(adapter.getMusicState()))
+
+        val landConfig = Configuration().apply {
+            orientation = Configuration.ORIENTATION_LANDSCAPE
+        }
+        adapter.onConfigurationChanged(landConfig)
+        assertEquals(restoredPlaying, adapter.getMusicState())
+        assertTrue("Active session state must be preserved across rotation to landscape", computeShouldShowCard(adapter.getMusicState()))
+
+        val portConfig = Configuration().apply {
+            orientation = Configuration.ORIENTATION_PORTRAIT
+        }
+        adapter.onConfigurationChanged(portConfig)
+        assertEquals(restoredPlaying, adapter.getMusicState())
+        assertTrue("Active session state must be preserved across rotation back to portrait", computeShouldShowCard(adapter.getMusicState()))
+    }
+
+    @Test
+    fun testGuidanceCard_shownWhenNoNotificationAccessAndMediaPlaying() {
+        val adapter = MainPagerAdapter(emptyList())
+
+        // 1. No notification access, confirmed external playback, not suppressed -> card visible
+        val guidanceState = MusicState(
+            isPlaying = true,
+            title = "",
+            hasNotificationAccess = false,
+            hasActiveSession = false,
+            confirmedExternalPlayback = true,
+            isSuppressed = false
+        )
+        adapter.updateMusicState(guidanceState)
+        assertTrue(
+            "Guidance card must show when no notification access and external playback confirmed",
+            MusicVisibilityPolicy.shouldShowCard(adapter.getMusicState())
+        )
+
+        // 2. In dialogue -> guidance card hidden
+        val inDialogueState = guidanceState.copy(isSuppressed = true)
+        adapter.updateMusicState(inDialogueState)
+        assertFalse(
+            "Guidance card must be hidden during dialogue suppression",
+            MusicVisibilityPolicy.shouldShowCard(adapter.getMusicState())
+        )
+
+        // 3. Stopped -> guidance card hidden
+        val stoppedState = guidanceState.copy(isPlaying = false, confirmedExternalPlayback = false)
+        adapter.updateMusicState(stoppedState)
+        assertFalse(
+            "Guidance card must be hidden when playback stopped",
+            MusicVisibilityPolicy.shouldShowCard(adapter.getMusicState())
+        )
     }
 }

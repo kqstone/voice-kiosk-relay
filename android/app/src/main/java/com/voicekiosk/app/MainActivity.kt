@@ -38,14 +38,17 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.voicekiosk.app.tts.TtsManager
 import androidx.fragment.app.FragmentActivity
 import androidx.viewpager2.widget.ViewPager2
 import com.voicekiosk.app.bridge.OriginBoundHost
 import com.voicekiosk.app.data.BoardModel
 import com.voicekiosk.app.data.BoardRepository
+import com.voicekiosk.app.location.LocationHelper
 import com.voicekiosk.app.media.MediaControlAction
 import com.voicekiosk.app.media.MusicState
 import com.voicekiosk.app.media.MusicStateManager
+import com.voicekiosk.app.ondevice.tools.CityTable
 import com.voicekiosk.app.ui.MainPagerAdapter
 import com.voicekiosk.app.ui.PageIndicatorView
 import com.voicekiosk.app.ui.VoiceListeningOverlayView
@@ -68,6 +71,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     companion object {
         private const val TAG = "MainActivity"
         private const val PERMISSION_REQUEST_AUDIO = 201
+        private const val PERMISSION_REQUEST_LOCATION = 202
         private const val BURN_IN_SHIFT_INTERVAL_MS = 60 * 1000L // 60 seconds
         private const val WAKE_STATE_DURATION_MS = 3500L // 3.5 seconds
         private const val TOUCH_WAKE_DURATION_MS = 8000L // 8 seconds of active display on touch
@@ -90,6 +94,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     private lateinit var listeningOverlayContainer: FrameLayout
     private lateinit var nightOverlayView: View
     private lateinit var voiceOverlay: VoiceListeningOverlayView
+    private var isTtsReady: Boolean = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val random = Random()
@@ -185,8 +190,15 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         applyImmersiveMode()
         updateDisplayPowerAndAodState()
         refreshWeather(force = false)
+        isTtsReady = TtsManager.getInstance(this).isReady()
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.setTtsUnavailable(!isTtsReady)
+        }
         if (::musicStateManager.isInitialized) {
             musicStateManager.checkAndUpdateState()
+        }
+        if (AppConfig.isAutoLocationEnabled(this) && LocationHelper.hasLocationPermission(this)) {
+            resolveCoarseLocationAndSyncWeather()
         }
     }
 
@@ -254,7 +266,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         nightOverlayView = findViewById(R.id.nightOverlayView)
 
         // 1. Initialize ViewPager2 Navigation Pager Framework (Page 0 Home Screen + Dynamic Boards)
-        musicStateManager = MusicStateManager(this).apply {
+        musicStateManager = MusicStateManager.getInstance(this).apply {
             setListener(object : MusicStateManager.Listener {
                 override fun onMusicStateUpdated(state: MusicState) {
                     mainHandler.post {
@@ -327,6 +339,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     private fun triggerVoiceWakeFromUi() {
         onUserInteractionWake()
         onWakeWordDetected(AppConfig.getWakeWord(this))
+        VoiceKioskService.triggerWake(this)
     }
 
     private fun handleSuggestionChipClicked(phrase: String) {
@@ -352,7 +365,13 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             setOnChipClickListener { phrase ->
                 handleSuggestionChipClicked(phrase)
             }
+            setOnTtsUnavailableClickListener {
+                val intent = Intent(this@MainActivity, SettingsActivity::class.java)
+                startActivity(intent)
+            }
         }
+        isTtsReady = TtsManager.getInstance(this).isReady()
+        voiceOverlay.setTtsUnavailable(!isTtsReady)
         listeningOverlayContainer.addView(voiceOverlay)
     }
 
@@ -559,6 +578,27 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             )
         } else {
             startKwsService()
+            checkAndRequestLocationPermission()
+        }
+    }
+
+    private fun checkAndRequestLocationPermission() {
+        if (!AppConfig.isAutoLocationEnabled(this)) {
+            Log.i(TAG, "Auto location is disabled in AppConfig, skipping coarse location check")
+            return
+        }
+        val hasCoarse = LocationHelper.hasLocationPermission(this)
+        if (hasCoarse) {
+            resolveCoarseLocationAndSyncWeather()
+        } else if (!AppConfig.isLocationPermissionRequested(this)) {
+            Log.i(TAG, "First time entering home: requesting ACCESS_COARSE_LOCATION")
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION),
+                PERMISSION_REQUEST_LOCATION
+            )
+        } else {
+            Log.i(TAG, "ACCESS_COARSE_LOCATION previously requested/denied; silently using manual city: ${AppConfig.getWeatherCity(this)}")
         }
     }
 
@@ -569,11 +609,77 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == PERMISSION_REQUEST_AUDIO) {
-            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            val audioIdx = permissions.indexOf(Manifest.permission.RECORD_AUDIO)
+            val granted = if (audioIdx >= 0 && audioIdx < grantResults.size) {
+                grantResults[audioIdx] == PackageManager.PERMISSION_GRANTED
+            } else {
+                grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            }
+            if (granted) {
                 Log.i(TAG, "RECORD_AUDIO permission granted")
                 startKwsService()
             } else {
                 Log.e(TAG, "RECORD_AUDIO permission denied")
+            }
+            checkAndRequestLocationPermission()
+        } else if (requestCode == PERMISSION_REQUEST_LOCATION) {
+            val locIdx = permissions.indexOf(Manifest.permission.ACCESS_COARSE_LOCATION)
+            val granted = if (locIdx >= 0 && locIdx < grantResults.size) {
+                grantResults[locIdx] == PackageManager.PERMISSION_GRANTED
+            } else {
+                grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            }
+            if (granted) {
+                Log.i(TAG, "ACCESS_COARSE_LOCATION permission granted")
+                resolveCoarseLocationAndSyncWeather()
+            } else {
+                Log.i(TAG, "ACCESS_COARSE_LOCATION permission denied; silently falling back to manual city")
+                AppConfig.setLocationPermissionRequested(this, true)
+            }
+        }
+    }
+
+    private fun resolveCoarseLocationAndSyncWeather() {
+        if (isFinishing || isDestroyed) return
+        if (!AppConfig.isAutoLocationEnabled(this)) {
+            Log.i(TAG, "Auto location disabled in AppConfig, skipping coarse resolution")
+            return
+        }
+        LocationHelper.requestCoarseLocation(this) { location ->
+            if (isFinishing || isDestroyed) return@requestCoarseLocation
+            if (location == null) {
+                Log.w(TAG, "Coarse location returned null or timed out; silently using manual city: ${AppConfig.getWeatherCity(this)}")
+                return@requestCoarseLocation
+            }
+            val lat = location.latitude
+            val lon = location.longitude
+            val nearest = CityTable.findNearest(lat, lon)
+            if (nearest == null) {
+                Log.w(TAG, "No matching city in CityTable for ($lat, $lon)")
+                return@requestCoarseLocation
+            }
+
+            val currentCity = AppConfig.getWeatherCity(this)
+            val currentLat = AppConfig.getWeatherLatitude(this).toDouble()
+            val currentLon = AppConfig.getWeatherLongitude(this).toDouble()
+
+            val shouldRefresh = LocationHelper.shouldRefreshWeatherForLocation(
+                currentCity = currentCity,
+                currentLat = currentLat,
+                currentLon = currentLon,
+                newCity = nearest.name,
+                newLat = lat,
+                newLon = lon
+            )
+
+            if (shouldRefresh) {
+                Log.i(TAG, "Coarse location resolved: ${nearest.name} ($lat, $lon), refreshing weather repository")
+                AppConfig.setWeatherLocation(this, nearest.name, lat.toFloat(), lon.toFloat())
+                AppConfig.setLastWeatherFetchMs(this, 0L)
+                AppConfig.setCachedWeatherSummary(this, "")
+                refreshWeather(force = true)
+            } else {
+                Log.i(TAG, "Spatial debounce: distance to ($lat, $lon) < 15km and city unchanged ($currentCity), skipping refresh")
             }
         }
     }
@@ -690,7 +796,16 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             voiceOverlay.setReply(replyText, isError = false)
         }
         mainHandler.removeCallbacks(resetWakeStateRunnable)
-        mainHandler.postDelayed(resetWakeStateRunnable, 4000L)
+        val dismissDelayMs = if (!isTtsReady) 7000L else 4000L
+        mainHandler.postDelayed(resetWakeStateRunnable, dismissDelayMs)
+    }
+
+    override fun onTtsStatusChanged(status: String, engineName: String?) {
+        Log.i(TAG, "UI received TTS status update: '$status' (engine=$engineName)")
+        isTtsReady = (status == "READY")
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.setTtsUnavailable(!isTtsReady)
+        }
     }
 
     override fun onWaitingForMuse(statusText: String) {
@@ -786,9 +901,13 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     }
 
     override fun onStateChanged(state: String) {
-        if (state == VoiceKioskService.PipelineState.KWS_LISTENING.name) {
+        val isKws = (state == VoiceKioskService.PipelineState.KWS_LISTENING.name)
+        if (isKws) {
             mainHandler.removeCallbacks(resetWakeStateRunnable)
             mainHandler.postDelayed(resetWakeStateRunnable, WAKE_STATE_DURATION_MS)
+        }
+        if (::musicStateManager.isInitialized) {
+            musicStateManager.setSuppressFallback(!isKws)
         }
     }
 

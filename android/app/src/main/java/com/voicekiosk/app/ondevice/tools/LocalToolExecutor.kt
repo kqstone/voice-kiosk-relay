@@ -1,7 +1,10 @@
 package com.voicekiosk.app.ondevice.tools
 
+import com.voicekiosk.app.media.MediaExecutedAction
 import com.voicekiosk.app.ondevice.route.Intents
 import com.voicekiosk.app.ondevice.route.RouteDecision
+import com.voicekiosk.app.weather.WeatherCacheEntry
+import com.voicekiosk.app.weather.WeatherRepository
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -69,9 +72,19 @@ class LocalToolExecutor(
     private val weather: WeatherSource? = null,
     /** S5: favourite artist from the long-term memory cache ("放我喜欢的歌"). */
     private val favoriteArtist: () -> String? = { null },
+    /** Shared weather repository for zero-network responses and cache sharing. */
+    private val weatherRepo: WeatherRepository? = null,
+    /** Callback invoked when a media control (pause/stop) or play action is executed. */
+    private val onMediaActionExecuted: ((MediaExecutedAction) -> Unit)? = null,
     /** The settings' weather city, used when the utterance names none (kept last: trailing lambda). */
     private val defaultCity: () -> City? = { null }
 ) {
+    /** Secondary constructor to preserve 3-arg call with trailing lambda: LocalToolExecutor(platform, weather) { defaultCity } */
+    constructor(
+        platform: LocalPlatform,
+        weather: WeatherSource?,
+        defaultCity: () -> City?
+    ) : this(platform, weather, { null }, null, null, defaultCity)
 
     /** Null if the decision can be executed locally, else why not. */
     fun validate(d: RouteDecision): String? = when (d.intent) {
@@ -101,9 +114,13 @@ class LocalToolExecutor(
         }
         Intents.WEATHER -> {
             val city = d.slots["city"]?.trim().orEmpty()
+            val day = normalizeDay(d.slots["day"])
+            val targetCity = city.ifEmpty { defaultCity()?.name }
+            val hasSourceOrFreshCache = weather != null || (weatherRepo?.getFreshForecastIfAvailable(targetCity, platform.nowMillis()) != null)
             when {
-                weather == null -> "weather unavailable"
-                normalizeDay(d.slots["day"]) == null -> "bad day"
+                !hasSourceOrFreshCache -> "weather unavailable"
+                day == null -> "bad day"
+                day !in setOf("today", "tomorrow", "after_tomorrow", "day_3", "day_4") -> "out of range: $day"
                 city.length > 10 -> "bad city"
                 (d.slots["kind"] ?: "general") !in setOf("general", "rain", "temp") -> "bad kind"
                 else -> null
@@ -179,6 +196,11 @@ class LocalToolExecutor(
 
     private fun media(action: MediaAction): ToolResult {
         if (!platform.sendMediaAction(action)) return ToolResult.fallback("media key not delivered")
+        if (action == MediaAction.PAUSE) {
+            onMediaActionExecuted?.invoke(MediaExecutedAction.PAUSE)
+        } else if (action == MediaAction.PLAY) {
+            onMediaActionExecuted?.invoke(MediaExecutedAction.PLAY)
+        }
         return ToolResult.ok(
             when (action) {
                 MediaAction.PLAY -> "好的，继续播放。"
@@ -200,6 +222,9 @@ class LocalToolExecutor(
         val artist = d.slots["artist"]?.trim()?.takeIf { it.isNotEmpty() }
         val query = listOfNotNull(artist, song).joinToString(" ").ifEmpty { d.slots["query"]?.trim().orEmpty() }
         val (result, player) = platform.playFromSearch(query, artist, song)
+        if (result == PlaySearchResult.STARTED || result == PlaySearchResult.UNINSTALLED_FALLBACK) {
+            onMediaActionExecuted?.invoke(MediaExecutedAction.PLAY)
+        }
         val what = when {
             artist != null && song != null -> "${artist}的「$song」"
             song != null -> "「$song」"
@@ -223,21 +248,66 @@ class LocalToolExecutor(
     }
 
     private fun weather(d: RouteDecision): ToolResult {
-        val src = weather ?: return ToolResult.fallback("weather unavailable")
-        val day = normalizeDay(d.slots["day"])!!
+        val day = normalizeDay(d.slots["day"]) ?: return ToolResult.fallback("bad day")
+        if (day !in setOf("today", "tomorrow", "after_tomorrow", "day_3", "day_4")) {
+            return ToolResult.fallback("out of range: $day")
+        }
+        val kind = d.slots["kind"] ?: "general"
         val name = d.slots["city"]?.trim()?.takeIf { it.isNotEmpty() }
+        val targetCityName = name ?: defaultCity()?.name
+
+        val cached = weatherRepo?.getFreshForecastIfAvailable(targetCityName, platform.nowMillis())
+        if (cached != null && WeatherSpeech.canAnswer(cached, day, kind)) {
+            val reply = WeatherSpeech.reply(cached, day, kind)
+            if (reply != null) {
+                return ToolResult.ok(reply)
+            }
+        }
+
+        val src = weather ?: return ToolResult.fallback("weather unavailable")
         val city = if (name == null) defaultCity() else CityTable.find(name) ?: src.geocode(name).getOrNull()
         if (city == null) return ToolResult.fallback("unknown city ${name ?: "(default)"}")
         val f = src.forecast(city).getOrElse { return ToolResult.fallback("forecast failed: ${it.message}") }
-        val reply = WeatherSpeech.reply(f, day, d.slots["kind"] ?: "general") ?: return ToolResult.fallback("no forecast for $day")
+
+        if (weatherRepo != null) {
+            val nowMs = platform.nowMillis()
+            val entry = WeatherCacheEntry(
+                info = f.toWeatherInfo(nowMs),
+                forecast = f,
+                timestampMs = nowMs,
+                locationKey = String.format(java.util.Locale.US, "%.4f,%.4f", city.latitude, city.longitude)
+            )
+            weatherRepo.setCacheEntry(entry)
+        }
+
+        val reply = WeatherSpeech.reply(f, day, kind) ?: return ToolResult.fallback("no forecast for $day")
         return ToolResult.ok(reply)
     }
 
-    private fun normalizeDay(raw: String?): String? = when (raw?.trim()) {
-        null, "", "today", "今天", "now" -> "today"
-        "tomorrow", "明天" -> "tomorrow"
-        "after_tomorrow", "后天" -> "after_tomorrow"
-        else -> null
+    internal fun normalizeDay(raw: String?): String? = when (val s = raw?.trim()) {
+        null, "", "today", "今天", "now", "今日", "今儿", "今儿个", "这会儿", "0", "day_0" -> "today"
+        "tomorrow", "明天", "明日", "明儿", "明儿个", "1", "day_1" -> "tomorrow"
+        "after_tomorrow", "后天", "后儿", "2", "day_2" -> "after_tomorrow"
+        "day_3", "大后天", "3" -> "day_3"
+        "day_4", "大大后天", "后天的后天", "4" -> "day_4"
+        "day_5", "第6天", "5" -> "day_5"
+        else -> {
+            val targetDow = com.voicekiosk.app.ondevice.route.RuleRouter.parseWeekday(s)
+            if (targetDow != null) {
+                val now = ZonedDateTime.ofInstant(Instant.ofEpochMilli(platform.nowMillis()), platform.zone())
+                val currentDow = now.dayOfWeek.value
+                val offset = (targetDow - currentDow + 7) % 7
+                when (offset) {
+                    0 -> "today"
+                    1 -> "tomorrow"
+                    2 -> "after_tomorrow"
+                    3 -> "day_3"
+                    4 -> "day_4"
+                    5 -> "day_5"
+                    else -> "day_6"
+                }
+            } else null
+        }
     }
 
     private fun timer(d: RouteDecision): ToolResult {

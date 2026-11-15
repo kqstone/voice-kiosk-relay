@@ -24,6 +24,8 @@ object WakeWordEventBus {
         fun onWaitingForMuse(statusText: String) {}
         /** Native PIN pad for a pending approval (`kind` is approve or reject). */
         fun onRequestPin(requestId: String, kind: String) {}
+        /** Text-to-Speech status update (READY, NO_ENGINE, INIT_FAILED, LANG_MISSING). */
+        fun onTtsStatusChanged(status: String, engineName: String? = null) {}
     }
 
     private val listeners = mutableListOf<Listener>()
@@ -153,6 +155,14 @@ object WakeWordEventBus {
         mainHandler.post {
             synchronized(this) {
                 listeners.forEach { it.onRequestPin(id, k) }
+            }
+        }
+    }
+
+    fun emitTtsStatus(status: String, engineName: String? = null) {
+        mainHandler.post {
+            synchronized(this) {
+                listeners.forEach { it.onTtsStatusChanged(status, engineName) }
             }
         }
     }

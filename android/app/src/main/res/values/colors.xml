@@ -38,6 +38,11 @@
     <color name="indicator_active">#FFFFFF</color>
     <color name="indicator_inactive">#475569</color>
 
+    <!-- Music Card Tokens -->
+    <color name="music_card_bg">#141416</color>
+    <color name="music_cover_bg">#18181B</color>
+    <color name="music_placeholder_tint">#64748B</color>
+
     <!-- Overlays -->
     <color name="overlay_listening">#CC000000</color>
     <color name="overlay_night">#D9000000</color>

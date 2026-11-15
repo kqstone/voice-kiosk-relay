@@ -161,4 +161,20 @@ class SettingsActivityContractTest {
         assertTrue("Must handle no player detected fallback", content.contains("未检测到可用音乐播放器"))
         assertTrue("Must prompt single choice dialog title 选择默认音乐播放器", content.contains("\"选择默认音乐播放器\""))
     }
+
+    @Test
+    fun testSettingsActivity_ttsBroadcastSettingsContract() {
+        val file = locateSourceFile("SettingsActivity.kt")
+        val content = file.readText(StandardCharsets.UTF_8)
+
+        assertTrue("Must include 语音播报 section", content.contains("\"语音播报\""))
+        assertTrue("Must declare ttsStatusText", content.contains("ttsStatusText"))
+        assertTrue("Must declare ttsEngineButton", content.contains("ttsEngineButton"))
+        assertTrue("Must have 试听 button", content.contains("\"试听\""))
+        assertTrue("Must have 打开系统 TTS 设置", content.contains("\"打开系统 TTS 设置\""))
+        assertTrue("Must launch com.android.settings.TTS_SETTINGS", content.contains("\"com.android.settings.TTS_SETTINGS\""))
+        assertTrue("Must have 安装语音数据", content.contains("\"安装语音数据\""))
+        assertTrue("Must launch ACTION_INSTALL_TTS_DATA", content.contains("ACTION_INSTALL_TTS_DATA"))
+        assertTrue("Must persist selectedTtsEngine in handleSave", content.contains("AppConfig.setPreferredTtsEngine(this, selectedTtsEngine)"))
+    }
 }
