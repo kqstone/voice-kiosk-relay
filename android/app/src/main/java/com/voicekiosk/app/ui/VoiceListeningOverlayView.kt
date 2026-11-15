@@ -40,6 +40,7 @@ class VoiceListeningOverlayView @JvmOverloads constructor(
     private var btnCloseOverlay: View? = null
     private var tvListeningSpeech: TextView? = null
     private var tvListeningReply: TextView? = null
+    private var tvTtsUnavailableHint: TextView? = null
     private var tvSuggestionPrompt: TextView? = null
     private var chipCommand1: TextView? = null
     private var chipCommand2: TextView? = null
@@ -70,6 +71,8 @@ class VoiceListeningOverlayView @JvmOverloads constructor(
 
     private var onCloseAction: (() -> Unit)? = null
     private var onChipAction: ((phrase: String) -> Unit)? = null
+    private var onTtsUnavailableAction: (() -> Unit)? = null
+    private var isTtsUnavailable = false
 
     // Cached state for orientation changes
     private var currentStatus = "正在聆听..."
@@ -106,6 +109,7 @@ class VoiceListeningOverlayView @JvmOverloads constructor(
         btnCloseOverlay = root.findViewById(R.id.btnCloseOverlay)
         tvListeningSpeech = root.findViewById(R.id.tvListeningSpeech)
         tvListeningReply = root.findViewById(R.id.tvListeningReply)
+        tvTtsUnavailableHint = root.findViewById(R.id.tvTtsUnavailableHint)
         tvSuggestionPrompt = root.findViewById(R.id.tvSuggestionPrompt)
         chipCommand1 = root.findViewById(R.id.chipCommand1)
         chipCommand2 = root.findViewById(R.id.chipCommand2)
@@ -114,6 +118,10 @@ class VoiceListeningOverlayView @JvmOverloads constructor(
 
         btnCloseOverlay?.setOnClickListener {
             dismiss()
+        }
+
+        tvTtsUnavailableHint?.setOnClickListener {
+            onTtsUnavailableAction?.invoke()
         }
 
         val chips = listOf(chipCommand1, chipCommand2, chipCommand3, chipCommand4)
@@ -242,6 +250,7 @@ class VoiceListeningOverlayView @JvmOverloads constructor(
         currentReply = null
         tvListeningSpeech?.text = text
         tvListeningReply?.visibility = View.GONE
+        tvTtsUnavailableHint?.visibility = View.GONE
     }
 
     fun setReply(replyText: String, isError: Boolean = false) {
@@ -258,6 +267,20 @@ class VoiceListeningOverlayView @JvmOverloads constructor(
             alpha = 0f
             animate().alpha(1f).setDuration(200L).start()
         }
+        tvTtsUnavailableHint?.visibility = if (isTtsUnavailable && !isError) View.VISIBLE else View.GONE
+    }
+
+    fun setTtsUnavailable(unavailable: Boolean) {
+        isTtsUnavailable = unavailable
+        if (tvListeningReply?.visibility == View.VISIBLE && !isCurrentReplyError) {
+            tvTtsUnavailableHint?.visibility = if (unavailable) View.VISIBLE else View.GONE
+        } else {
+            tvTtsUnavailableHint?.visibility = View.GONE
+        }
+    }
+
+    fun setOnTtsUnavailableClickListener(listener: () -> Unit) {
+        this.onTtsUnavailableAction = listener
     }
 
     fun setOnCloseListener(listener: () -> Unit) {
@@ -272,6 +295,7 @@ class VoiceListeningOverlayView @JvmOverloads constructor(
         stopBreathingAnimation()
         onCloseAction = null
         onChipAction = null
+        onTtsUnavailableAction = null
         animate().cancel()
     }
 

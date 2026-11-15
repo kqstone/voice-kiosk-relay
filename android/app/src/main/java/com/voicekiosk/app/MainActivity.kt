@@ -38,6 +38,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import com.voicekiosk.app.tts.TtsManager
 import androidx.fragment.app.FragmentActivity
 import androidx.viewpager2.widget.ViewPager2
 import com.voicekiosk.app.bridge.OriginBoundHost
@@ -93,6 +94,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     private lateinit var listeningOverlayContainer: FrameLayout
     private lateinit var nightOverlayView: View
     private lateinit var voiceOverlay: VoiceListeningOverlayView
+    private var isTtsReady: Boolean = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val random = Random()
@@ -188,6 +190,10 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         applyImmersiveMode()
         updateDisplayPowerAndAodState()
         refreshWeather(force = false)
+        isTtsReady = TtsManager.getInstance(this).isReady()
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.setTtsUnavailable(!isTtsReady)
+        }
         if (::musicStateManager.isInitialized) {
             musicStateManager.checkAndUpdateState()
         }
@@ -358,7 +364,13 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             setOnChipClickListener { phrase ->
                 handleSuggestionChipClicked(phrase)
             }
+            setOnTtsUnavailableClickListener {
+                val intent = Intent(this@MainActivity, SettingsActivity::class.java)
+                startActivity(intent)
+            }
         }
+        isTtsReady = TtsManager.getInstance(this).isReady()
+        voiceOverlay.setTtsUnavailable(!isTtsReady)
         listeningOverlayContainer.addView(voiceOverlay)
     }
 
@@ -783,7 +795,16 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             voiceOverlay.setReply(replyText, isError = false)
         }
         mainHandler.removeCallbacks(resetWakeStateRunnable)
-        mainHandler.postDelayed(resetWakeStateRunnable, 4000L)
+        val dismissDelayMs = if (!isTtsReady) 7000L else 4000L
+        mainHandler.postDelayed(resetWakeStateRunnable, dismissDelayMs)
+    }
+
+    override fun onTtsStatusChanged(status: String, engineName: String?) {
+        Log.i(TAG, "UI received TTS status update: '$status' (engine=$engineName)")
+        isTtsReady = (status == "READY")
+        if (::voiceOverlay.isInitialized) {
+            voiceOverlay.setTtsUnavailable(!isTtsReady)
+        }
     }
 
     override fun onWaitingForMuse(statusText: String) {

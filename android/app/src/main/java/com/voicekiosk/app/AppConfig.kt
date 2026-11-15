@@ -86,6 +86,8 @@ object AppConfig {
     private const val KEY_ONDEVICE_WEATHER_ENABLED = "pref_ondevice_weather_enabled"
     const val KEY_ONDEVICE_PLAYER_PACKAGE = "pref_ondevice_player_package"
     const val DEFAULT_ONDEVICE_PLAYER_PACKAGE = ""
+    const val KEY_PREFERRED_TTS_ENGINE = "pref_tts_engine"
+    const val DEFAULT_PREFERRED_TTS_ENGINE = ""
     private const val KEY_WEATHER_CITY = "pref_weather_city"
     private const val KEY_WEATHER_LATITUDE = "pref_weather_latitude"
     private const val KEY_WEATHER_LONGITUDE = "pref_weather_longitude"
@@ -328,6 +330,20 @@ object AppConfig {
 
     fun setOnDevicePlayerPackage(prefs: SharedPreferences, pkg: String?) {
         prefs.edit().putString(KEY_ONDEVICE_PLAYER_PACKAGE, normalizePlayerPackage(pkg)).apply()
+    }
+
+    fun getPreferredTtsEngine(context: Context): String =
+        getPreferredTtsEngine(prefs(context))
+
+    fun getPreferredTtsEngine(prefs: SharedPreferences): String =
+        prefs.getString(KEY_PREFERRED_TTS_ENGINE, DEFAULT_PREFERRED_TTS_ENGINE)?.trim().orEmpty()
+
+    fun setPreferredTtsEngine(context: Context, enginePackage: String?) {
+        setPreferredTtsEngine(prefs(context), enginePackage)
+    }
+
+    fun setPreferredTtsEngine(prefs: SharedPreferences, enginePackage: String?) {
+        prefs.edit().putString(KEY_PREFERRED_TTS_ENGINE, enginePackage?.trim().orEmpty()).apply()
     }
 
     fun getWeatherCity(context: Context): String =

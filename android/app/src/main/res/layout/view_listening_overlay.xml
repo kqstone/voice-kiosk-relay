@@ -95,6 +95,24 @@
             android:ellipsize="end"
             android:visibility="gone" />
 
+        <TextView
+            android:id="@+id/tvTtsUnavailableHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_overlay_close"
+            android:paddingStart="12dp"
+            android:paddingTop="4dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="4dp"
+            android:text="语音播报不可用，点此设置"
+            android:textColor="@color/accent_amber_light"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone" />
+
     </LinearLayout>
 
     <!-- Bottom Suggestion Area -->

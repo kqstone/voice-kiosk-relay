@@ -69,6 +69,24 @@ class AppConfigTest {
     }
 
     @Test
+    fun testPreferredTtsEnginePersistenceAndDefault() {
+        val prefs = FakeSharedPreferences()
+        assertEquals("", AppConfig.getPreferredTtsEngine(prefs))
+
+        AppConfig.setPreferredTtsEngine(prefs, "com.google.android.tts")
+        assertEquals("com.google.android.tts", AppConfig.getPreferredTtsEngine(prefs))
+
+        AppConfig.setPreferredTtsEngine(prefs, "  com.iflytek.speechcloud  ")
+        assertEquals("com.iflytek.speechcloud", AppConfig.getPreferredTtsEngine(prefs))
+
+        AppConfig.setPreferredTtsEngine(prefs, "")
+        assertEquals("", AppConfig.getPreferredTtsEngine(prefs))
+
+        AppConfig.setPreferredTtsEngine(prefs, null)
+        assertEquals("", AppConfig.getPreferredTtsEngine(prefs))
+    }
+
+    @Test
     fun testContextPrefsOverride() {
         val prefs = FakeSharedPreferences()
         try {

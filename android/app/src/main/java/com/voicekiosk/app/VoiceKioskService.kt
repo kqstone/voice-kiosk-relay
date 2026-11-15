@@ -16,8 +16,7 @@ import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
-import android.speech.tts.TextToSpeech
-import android.speech.tts.UtteranceProgressListener
+import com.voicekiosk.app.tts.TtsManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.k2fsa.sherpa.onnx.EndpointConfig
@@ -74,10 +73,10 @@ import kotlin.math.sqrt
  *        to app private filesDir with SHA256 verification and dashboard progress reporting.
  * - Endpointing: Energy-based VAD (~1.2s silence below threshold after speech) or 8s max duration.
  * - Bridge Chat: POST JSON to /api/v1/chat (HttpURLConnection, 10s timeout, no redirects).
- * - TTS: Android system TextToSpeech (Locale.CHINA / zh-CN, device default TTS engine).
+ * - TTS: Managed via TtsManager (Locale.CHINA / zh-CN, candidate sequence).
  * - Offline / Error resilience: Shows clear offline notice on dashboard and never speaks a fake answer.
  */
-class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
+class VoiceKioskService : Service() {
 
     enum class PipelineState {
         KWS_LISTENING,
@@ -231,9 +230,7 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
     private var wifiLock: WifiManager.WifiLock? = null
     private var toneGenerator: ToneGenerator? = null
 
-    private var tts: TextToSpeech? = null
-    @Volatile
-    private var isTtsReady = false
+    private lateinit var ttsManager: TtsManager
 
     private var kws: KeywordSpotter? = null
     private var kwsStream: OnlineStream? = null
@@ -330,99 +327,30 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         super.onDestroy()
     }
 
-    // --- TextToSpeech Initialization ---
+    // --- TextToSpeech Initialization & Delegation ---
 
     private fun initTts() {
-        try {
-            tts = TextToSpeech(applicationContext, this)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize TextToSpeech", e)
-        }
-    }
-
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            val engine = tts ?: return
-            val res = engine.setLanguage(Locale.CHINA)
-            if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
-                val fallbackRes = engine.setLanguage(Locale.SIMPLIFIED_CHINESE)
-                if (fallbackRes == TextToSpeech.LANG_MISSING_DATA || fallbackRes == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    Log.w(TAG, "zh-CN locale not supported by system TTS engine (code=$res)")
-                } else {
-                    isTtsReady = true
-                    Log.i(TAG, "TTS initialized with SIMPLIFIED_CHINESE")
-                }
-            } else {
-                isTtsReady = true
-                Log.i(TAG, "TTS initialized with zh-CN")
-            }
-        } else {
-            Log.e(TAG, "TextToSpeech onInit failed with status: $status")
-        }
+        ttsManager = TtsManager.getInstance(applicationContext)
+        ttsManager.init()
     }
 
     private fun releaseTts() {
-        try {
-            tts?.stop()
-            tts?.shutdown()
-            tts = null
-            isTtsReady = false
-        } catch (e: Exception) {
-            Log.e(TAG, "Error releasing TextToSpeech", e)
+        if (::ttsManager.isInitialized) {
+            ttsManager.release()
         }
     }
 
     private fun speakBlocking(text: String) {
-        val engine = tts
-        if (!isTtsReady || engine == null || text.isBlank()) {
-            Log.w(TAG, "TTS not ready or empty text, skipping speech playback")
-            return
-        }
-
-        val utteranceId = "vk_${UUID.randomUUID()}"
-        val latch = CountDownLatch(1)
-
-        engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(id: String?) {
-                Log.i(TAG, "TTS started speaking ($id)")
-            }
-
-            override fun onDone(id: String?) {
-                Log.i(TAG, "TTS finished speaking ($id)")
-                latch.countDown()
-            }
-
-            @Deprecated("Deprecated in Java")
-            override fun onError(id: String?) {
-                Log.w(TAG, "TTS error ($id)")
-                latch.countDown()
-            }
-
-            override fun onError(id: String?, errorCode: Int) {
-                Log.w(TAG, "TTS error ($id, code=$errorCode)")
-                latch.countDown()
-            }
-        })
-
-        val speakResult = engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-        if (speakResult == TextToSpeech.ERROR) {
-            Log.e(TAG, "TTS speak() returned ERROR")
-            return
-        }
-
-        // Wait up to 20s for utterance playback to finish before re-arming KWS
-        try {
-            latch.await(20, TimeUnit.SECONDS)
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
+        if (::ttsManager.isInitialized) {
+            ttsManager.speakBlocking(text)
         }
     }
 
     /** Non-blocking TTS for the WebView VoiceKioskHost.speak hook. */
     private fun speakNonBlocking(text: String) {
-        val engine = tts
-        if (!isTtsReady || engine == null || text.isBlank()) return
-        engine.speak(text, TextToSpeech.QUEUE_ADD, null, "vk_host_${UUID.randomUUID()}")
+        if (::ttsManager.isInitialized) {
+            ttsManager.speakNonBlocking(text)
+        }
     }
 
     // --- Foreground Service & Locks ---
@@ -1356,9 +1284,8 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
         val text = if (label != null) "时间到了，提醒你：$label。" else "计时${LocalToolExecutor.spokenDuration(seconds)}到了。"
         WakeWordEventBus.emitChatReply("⏰ $text")
         playPromptBeep()
-        val engine = tts
-        if (isTtsReady && engine != null) {
-            engine.speak(text, TextToSpeech.QUEUE_ADD, null, "vk_timer_${UUID.randomUUID()}")
+        if (::ttsManager.isInitialized) {
+            ttsManager.speakNonBlocking(text, "vk_timer_${UUID.randomUUID()}")
         }
     }
 

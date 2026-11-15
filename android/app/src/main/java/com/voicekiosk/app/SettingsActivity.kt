@@ -10,6 +10,9 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import com.voicekiosk.app.tts.TtsManager
+import com.voicekiosk.app.tts.TtsStatus
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
@@ -80,6 +83,11 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
     private lateinit var weatherCityEditText: EditText
     private val weatherPresetChips = mutableListOf<Pair<TextView, CityLocation>>()
 
+    // Voice Broadcast (TTS)
+    private var selectedTtsEngine: String = ""
+    private lateinit var ttsStatusText: TextView
+    private lateinit var ttsEngineButton: Button
+
     // OLED Standby & Night Mode
     private lateinit var onDeviceRoutingCheckBox: CheckBox
     private lateinit var onDeviceModelCheckBox: CheckBox
@@ -129,6 +137,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         isActivityVisible = true
         AndroidReleaseUpdatePlatform.getManager(this).registerListener(this)
         refreshPlayerSettingsAction?.invoke()
+        if (::ttsStatusText.isInitialized) {
+            refreshTtsUi()
+        }
     }
 
     override fun onStop() {
@@ -161,6 +172,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         // Initialize night mode schedule state
         selectedNightStartHour = AppConfig.getNightModeStartHour(this)
         selectedNightEndHour = AppConfig.getNightModeEndHour(this)
+
+        // Initialize preferred TTS engine state
+        selectedTtsEngine = AppConfig.getPreferredTtsEngine(this)
 
         val rootScrollView = ScrollView(this).apply {
             setBackgroundColor(Color.parseColor("#121212"))
@@ -701,6 +715,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         weatherCard.addView(weatherHint)
 
         container.addView(weatherCard)
+
+        // Section: Voice Broadcast (TTS) Settings Card
+        buildTtsCard(container)
 
         // Section 4: OLED AOD Standby & Night Mode Settings Card
         val oledCard = createCardLayout().apply {
@@ -1637,6 +1654,7 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         AppConfig.setMemoryExtractionEnabled(this, memoryExtractionCheckBox.isChecked)
         AppConfig.setOnDeviceWeatherEnabled(this, onDeviceWeatherCheckBox.isChecked)
         AppConfig.setOnDevicePlayerPackage(this, onDevicePlayerPackage)
+        AppConfig.setPreferredTtsEngine(this, selectedTtsEngine)
         AppConfig.setNightModeEnabled(this, nightModeCheckBox.isChecked)
         AppConfig.setNightModeStartHour(this, selectedNightStartHour)
         AppConfig.setNightModeEndHour(this, selectedNightEndHour)
@@ -2216,5 +2234,263 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
             "读取失败：${e.javaClass.simpleName}"
         }
         AlertDialog.Builder(this).setTitle("长期记忆").setMessage(text).setPositiveButton("关闭", null).show()
+    }
+
+    /**
+     * Voice Broadcast (TTS) settings card:
+     * - Status & engine display
+     * - Engine dropdown chooser
+     * - Test listen button
+     * - Open system TTS settings
+     * - Install TTS voice data
+     */
+    private fun buildTtsCard(container: LinearLayout) {
+        val ttsCard = createCardLayout().apply {
+            val lp = layoutParams as? LinearLayout.LayoutParams
+                ?: LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            lp.topMargin = dpToPx(16)
+            layoutParams = lp
+        }
+
+        val ttsTitle = TextView(this).apply {
+            text = "语音播报"
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            typeface = Typeface.DEFAULT_BOLD
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(6)
+            }
+            layoutParams = lp
+        }
+        ttsCard.addView(ttsTitle)
+
+        val ttsSubtitle = TextView(this).apply {
+            text = "设置语音回答与报时所用的本机语音引擎，支持切换引擎、试听及安装中文数据包"
+            setTextColor(Color.parseColor("#9CA3AF"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(10)
+            }
+            layoutParams = lp
+        }
+        ttsCard.addView(ttsSubtitle)
+
+        ttsStatusText = TextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(10)
+            }
+            layoutParams = lp
+        }
+        ttsCard.addView(ttsStatusText)
+
+        ttsEngineButton = Button(this).apply {
+            isAllCaps = false
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(10)
+            }
+            layoutParams = lp
+            setOnClickListener {
+                showTtsEngineChooserDialog()
+            }
+        }
+        ttsCard.addView(ttsEngineButton)
+
+        val actionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(4)
+            }
+            layoutParams = lp
+        }
+
+        val testSpeakButton = Button(this).apply {
+            text = "试听"
+            isAllCaps = false
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = dpToPx(6)
+            }
+            layoutParams = lp
+            setOnClickListener {
+                handleTtsTestSpeak()
+            }
+        }
+        actionRow.addView(testSpeakButton)
+
+        val systemTtsButton = Button(this).apply {
+            text = "打开系统 TTS 设置"
+            isAllCaps = false
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.4f).apply {
+                marginEnd = dpToPx(6)
+            }
+            layoutParams = lp
+            setOnClickListener {
+                openSystemTtsSettings()
+            }
+        }
+        actionRow.addView(systemTtsButton)
+
+        val installDataButton = Button(this).apply {
+            text = "安装语音数据"
+            isAllCaps = false
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.4f)
+            layoutParams = lp
+            setOnClickListener {
+                openInstallTtsData()
+            }
+        }
+        actionRow.addView(installDataButton)
+
+        ttsCard.addView(actionRow)
+
+        val ttsNote = TextView(this).apply {
+            text = "提示：若提示缺少中文数据，可点击「安装语音数据」下载或在「系统 TTS 设置」中安装中文语言包。"
+            setTextColor(Color.parseColor("#9CA3AF"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dpToPx(8)
+            }
+            layoutParams = lp
+        }
+        ttsCard.addView(ttsNote)
+
+        container.addView(ttsCard)
+        refreshTtsUi()
+    }
+
+    private fun refreshTtsUi() {
+        val ttsMgr = TtsManager.getInstance(this)
+        val available = ttsMgr.queryAvailableEngines(this)
+        val currentStatus = ttsMgr.selector.status
+        val activeEngine = ttsMgr.selector.selectedEngine
+
+        val statusDesc = when (currentStatus) {
+            TtsStatus.READY -> "就绪 (READY)"
+            TtsStatus.NO_ENGINE -> "未安装可用 TTS 引擎 (NO_ENGINE)"
+            TtsStatus.INIT_FAILED -> "引擎初始化失败 (INIT_FAILED)"
+            TtsStatus.LANG_MISSING -> "缺少中文语音数据 (LANG_MISSING)"
+        }
+        val statusColor = when (currentStatus) {
+            TtsStatus.READY -> Color.parseColor("#10B981")
+            TtsStatus.LANG_MISSING -> Color.parseColor("#F59E0B")
+            TtsStatus.NO_ENGINE, TtsStatus.INIT_FAILED -> Color.parseColor("#EF4444")
+        }
+
+        val activeLabel = if (!activeEngine.isNullOrEmpty()) {
+            val found = available.firstOrNull { it.packageName == activeEngine }
+            found?.let { "${it.label} (${it.packageName})" } ?: activeEngine
+        } else {
+            "无"
+        }
+
+        ttsStatusText.text = "当前状态：$statusDesc\n运行引擎：$activeLabel"
+        ttsStatusText.setTextColor(statusColor)
+
+        val chosenLabel = if (selectedTtsEngine.isEmpty()) {
+            "自动选择系统默认（推荐）"
+        } else {
+            val found = available.firstOrNull { it.packageName == selectedTtsEngine }
+            found?.let { "${it.label} (${it.packageName})" } ?: selectedTtsEngine
+        }
+        ttsEngineButton.text = "当前选择：$chosenLabel"
+    }
+
+    private fun showTtsEngineChooserDialog() {
+        val ttsMgr = TtsManager.getInstance(this)
+        val available = ttsMgr.queryAvailableEngines(this)
+        val labels = mutableListOf<String>()
+        val pkgs = mutableListOf<String>()
+
+        labels.add("自动选择系统默认（推荐）")
+        pkgs.add("")
+
+        for (eng in available) {
+            labels.add("${eng.label} (${eng.packageName})")
+            pkgs.add(eng.packageName)
+        }
+
+        val currentSelected = selectedTtsEngine
+        if (currentSelected.isNotEmpty() && !pkgs.contains(currentSelected)) {
+            labels.add("$currentSelected (未检测到)")
+            pkgs.add(currentSelected)
+        }
+
+        var selectedIndex = pkgs.indexOf(currentSelected).coerceAtLeast(0)
+
+        AlertDialog.Builder(this)
+            .setTitle("选择 TTS 语音引擎")
+            .setSingleChoiceItems(labels.toTypedArray(), selectedIndex) { _, which ->
+                selectedIndex = which
+            }
+            .setPositiveButton("确定") { dialog, _ ->
+                if (selectedIndex in pkgs.indices) {
+                    selectedTtsEngine = pkgs[selectedIndex]
+                    refreshTtsUi()
+                }
+                dialog.dismiss()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun handleTtsTestSpeak() {
+        val ttsMgr = TtsManager.getInstance(this)
+        val spoken = ttsMgr.speakNonBlocking("你好，这是语音播报测试。")
+        if (!spoken) {
+            Toast.makeText(this, "语音播报当前不可用 (${ttsMgr.selector.status})", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun openSystemTtsSettings() {
+        try {
+            val intent = Intent("com.android.settings.TTS_SETTINGS").apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            try {
+                val fallback = Intent(android.provider.Settings.ACTION_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(fallback)
+            } catch (_: Exception) {
+                Toast.makeText(this, "无法打开系统设置", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun openInstallTtsData() {
+        try {
+            val intent = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                if (selectedTtsEngine.isNotEmpty()) {
+                    setPackage(selectedTtsEngine)
+                }
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "未找到语音数据安装程序", Toast.LENGTH_SHORT).show()
+        }
     }
 }
