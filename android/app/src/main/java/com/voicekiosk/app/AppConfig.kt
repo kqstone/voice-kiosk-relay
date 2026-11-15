@@ -98,7 +98,14 @@ object AppConfig {
     const val KEY_CACHED_WEATHER_JSON = "pref_cached_weather_json"
     private const val KEY_LAST_WEATHER_FETCH_MS = "pref_last_weather_fetch_ms"
     const val WEATHER_CACHE_TTL_MS = 30 * 60 * 1000L
-    private const val KEY_STARTUP_UPDATE_CHECK_ENABLED = "pref_startup_update_check_enabled"
+    const val KEY_EXPERIMENTAL_AEC_NS_ENABLED = "pref_experimental_aec_ns_enabled"
+    const val DEFAULT_EXPERIMENTAL_AEC_NS_ENABLED = false
+
+    const val AUDIO_DRAIN_DEFAULT_MS = 180L
+    const val AUDIO_DRAIN_MUSIC_FADEOUT_MAX_MS = 500L
+    const val AUDIO_PROACTIVE_PAUSE_DELAY_MS = 300L
+
+    const val KEY_STARTUP_UPDATE_CHECK_ENABLED = "pref_startup_update_check_enabled"
     private const val KEY_LAST_STARTUP_UPDATE_CHECK_MS = "pref_last_startup_update_check_ms"
 
     const val DEFAULT_STARTUP_UPDATE_CHECK_ENABLED = false
@@ -308,6 +315,24 @@ object AppConfig {
 
     fun setOnDeviceWeatherEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_ONDEVICE_WEATHER_ENABLED, enabled).apply()
+    }
+
+    /**
+     * Experimental: changes AudioRecord audio source to VOICE_RECOGNITION and attempts hardware AEC/NS.
+     * Default false (uses MediaRecorder.AudioSource.MIC).
+     */
+    fun isExperimentalAecNsEnabled(context: Context): Boolean =
+        isExperimentalAecNsEnabled(prefs(context))
+
+    fun isExperimentalAecNsEnabled(prefs: SharedPreferences): Boolean =
+        prefs.getBoolean(KEY_EXPERIMENTAL_AEC_NS_ENABLED, DEFAULT_EXPERIMENTAL_AEC_NS_ENABLED)
+
+    fun setExperimentalAecNsEnabled(context: Context, enabled: Boolean) {
+        setExperimentalAecNsEnabled(prefs(context), enabled)
+    }
+
+    fun setExperimentalAecNsEnabled(prefs: SharedPreferences, enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_EXPERIMENTAL_AEC_NS_ENABLED, enabled).apply()
     }
 
     /**

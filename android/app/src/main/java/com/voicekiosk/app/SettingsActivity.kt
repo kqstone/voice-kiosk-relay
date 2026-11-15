@@ -96,6 +96,7 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
     private lateinit var onDeviceSpeculativeCheckBox: CheckBox
     private lateinit var memoryExtractionCheckBox: CheckBox
     private lateinit var onDeviceWeatherCheckBox: CheckBox
+    private lateinit var experimentalAecNsCheckBox: CheckBox
     private var onDevicePlayerPackage: String = ""
     @Volatile private var modelDownloader: com.voicekiosk.app.ondevice.OnDeviceModelDownloader? = null
     private lateinit var nightModeCheckBox: CheckBox
@@ -1653,6 +1654,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         AppConfig.setOnDeviceSpeculativeCloudEnabled(this, onDeviceSpeculativeCheckBox.isChecked)
         AppConfig.setMemoryExtractionEnabled(this, memoryExtractionCheckBox.isChecked)
         AppConfig.setOnDeviceWeatherEnabled(this, onDeviceWeatherCheckBox.isChecked)
+        if (::experimentalAecNsCheckBox.isInitialized) {
+            AppConfig.setExperimentalAecNsEnabled(this, experimentalAecNsCheckBox.isChecked)
+        }
         AppConfig.setOnDevicePlayerPackage(this, onDevicePlayerPackage)
         AppConfig.setPreferredTtsEngine(this, selectedTtsEngine)
         AppConfig.setNightModeEnabled(this, nightModeCheckBox.isChecked)
@@ -2193,6 +2197,15 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         button("端侧模型基准测试 / 路由评测") {
             startActivity(Intent(this, com.voicekiosk.app.ondevice.LlmBenchmarkActivity::class.java))
         }
+
+        // ---- 录音与硬件回声消除（实验） ----
+        section("录音与硬件回声消除（实验）")
+        experimentalAecNsCheckBox = check(
+            "启用 VOICE_RECOGNITION 录音源与硬件 AEC/NS（实验性）",
+            AppConfig.isExperimentalAecNsEnabled(this)
+        )
+        note("开启后录音源切换为 VOICE_RECOGNITION 并尝试开启系统硬件回声消除与降噪；在部分机型上可能影响唤醒灵敏度与拾音音量，默认关闭。主方案依赖对话时自动暂停后台音乐。")
+        note("已知限制：完全不理会焦点且没有 MediaSession 的播放器可能停不下来；没有通知使用权时主动暂停只能靠媒体按键，建议开启通知使用权。")
 
         // options that only act through the fast path
         val dependents = listOf(onDeviceWeatherCheckBox, onDeviceChitchatCheckBox, playerButton, onDeviceModelCheckBox, onDeviceSpeculativeCheckBox, memoryExtractionCheckBox)

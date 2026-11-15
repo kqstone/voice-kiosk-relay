@@ -115,4 +115,28 @@ class LocalToolExecutorTest {
         assertNull(x.validate(d(Intents.VOLUME, "level" to "30")))
         assertTrue(x.execute(d(Intents.WEATHER)).fallbackToCloud)
     }
+
+    @Test
+    fun mediaActionExecutedCallback() {
+        val executedActions = mutableListOf<com.voicekiosk.app.media.MediaExecutedAction>()
+        val customX = LocalToolExecutor(
+            p,
+            onMediaActionExecuted = { executedActions.add(it) }
+        )
+        customX.execute(d(Intents.MEDIA_CONTROL, "action" to "pause"))
+        assertEquals(listOf(com.voicekiosk.app.media.MediaExecutedAction.PAUSE), executedActions)
+
+        customX.execute(d(Intents.MEDIA_CONTROL, "action" to "resume"))
+        assertEquals(listOf(com.voicekiosk.app.media.MediaExecutedAction.PAUSE, com.voicekiosk.app.media.MediaExecutedAction.PLAY), executedActions)
+
+        customX.execute(d(Intents.MEDIA_PLAY, "artist" to "周杰伦", "song" to "晴天"))
+        assertEquals(
+            listOf(
+                com.voicekiosk.app.media.MediaExecutedAction.PAUSE,
+                com.voicekiosk.app.media.MediaExecutedAction.PLAY,
+                com.voicekiosk.app.media.MediaExecutedAction.PLAY
+            ),
+            executedActions
+        )
+    }
 }

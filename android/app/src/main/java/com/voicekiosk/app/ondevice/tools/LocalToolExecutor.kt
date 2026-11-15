@@ -1,5 +1,6 @@
 package com.voicekiosk.app.ondevice.tools
 
+import com.voicekiosk.app.media.MediaExecutedAction
 import com.voicekiosk.app.ondevice.route.Intents
 import com.voicekiosk.app.ondevice.route.RouteDecision
 import com.voicekiosk.app.weather.WeatherCacheEntry
@@ -73,6 +74,8 @@ class LocalToolExecutor(
     private val favoriteArtist: () -> String? = { null },
     /** Shared weather repository for zero-network responses and cache sharing. */
     private val weatherRepo: WeatherRepository? = null,
+    /** Callback invoked when a media control (pause/stop) or play action is executed. */
+    private val onMediaActionExecuted: ((MediaExecutedAction) -> Unit)? = null,
     /** The settings' weather city, used when the utterance names none (kept last: trailing lambda). */
     private val defaultCity: () -> City? = { null }
 ) {
@@ -81,7 +84,7 @@ class LocalToolExecutor(
         platform: LocalPlatform,
         weather: WeatherSource?,
         defaultCity: () -> City?
-    ) : this(platform, weather, { null }, null, defaultCity)
+    ) : this(platform, weather, { null }, null, null, defaultCity)
 
     /** Null if the decision can be executed locally, else why not. */
     fun validate(d: RouteDecision): String? = when (d.intent) {
@@ -193,6 +196,11 @@ class LocalToolExecutor(
 
     private fun media(action: MediaAction): ToolResult {
         if (!platform.sendMediaAction(action)) return ToolResult.fallback("media key not delivered")
+        if (action == MediaAction.PAUSE) {
+            onMediaActionExecuted?.invoke(MediaExecutedAction.PAUSE)
+        } else if (action == MediaAction.PLAY) {
+            onMediaActionExecuted?.invoke(MediaExecutedAction.PLAY)
+        }
         return ToolResult.ok(
             when (action) {
                 MediaAction.PLAY -> "好的，继续播放。"
@@ -214,6 +222,9 @@ class LocalToolExecutor(
         val artist = d.slots["artist"]?.trim()?.takeIf { it.isNotEmpty() }
         val query = listOfNotNull(artist, song).joinToString(" ").ifEmpty { d.slots["query"]?.trim().orEmpty() }
         val (result, player) = platform.playFromSearch(query, artist, song)
+        if (result == PlaySearchResult.STARTED || result == PlaySearchResult.UNINSTALLED_FALLBACK) {
+            onMediaActionExecuted?.invoke(MediaExecutedAction.PLAY)
+        }
         val what = when {
             artist != null && song != null -> "${artist}的「$song」"
             song != null -> "「$song」"

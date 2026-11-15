@@ -34,6 +34,19 @@ class MusicStateManager(private val context: Context) {
     companion object {
         private const val TAG = "MusicStateManager"
         private const val FALLBACK_POLL_INTERVAL_MS = 2000L // 2s poll for audioManager.isMusicActive
+
+        @Volatile
+        private var instance: MusicStateManager? = null
+
+        fun getInstance(context: Context): MusicStateManager {
+            return instance ?: synchronized(this) {
+                instance ?: MusicStateManager(context.applicationContext).also { instance = it }
+            }
+        }
+    }
+
+    init {
+        if (instance == null) instance = this
     }
 
     interface Listener {
@@ -326,6 +339,43 @@ class MusicStateManager(private val context: Context) {
     private fun updateMusicState(newState: MusicState) {
         currentMusicState = newState
         listener?.onMusicStateUpdated(currentMusicState)
+    }
+
+    fun isMusicActive(): Boolean {
+        val ctrlPlaying = activeController?.playbackState?.let { isPlayingState(it.state) } ?: false
+        return currentMusicState.isPlaying || ctrlPlaying || audioManager.isMusicActive
+    }
+
+    /**
+     * Proactively pauses media playback via transportControls.pause, falling back to KEYCODE_MEDIA_PAUSE.
+     */
+    fun pause() {
+        val controller = activeController
+        if (controller != null) {
+            try {
+                controller.transportControls.pause()
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "Transport pause failed, falling back to key event: ${e.message}")
+            }
+        }
+        dispatchMediaKeyEvent(KeyEvent.KEYCODE_MEDIA_PAUSE)
+    }
+
+    /**
+     * Resumes media playback via transportControls.play, falling back to KEYCODE_MEDIA_PLAY.
+     */
+    fun play() {
+        val controller = activeController
+        if (controller != null) {
+            try {
+                controller.transportControls.play()
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "Transport play failed, falling back to key event: ${e.message}")
+            }
+        }
+        dispatchMediaKeyEvent(KeyEvent.KEYCODE_MEDIA_PLAY)
     }
 
     /**

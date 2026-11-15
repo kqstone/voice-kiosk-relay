@@ -266,7 +266,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         nightOverlayView = findViewById(R.id.nightOverlayView)
 
         // 1. Initialize ViewPager2 Navigation Pager Framework (Page 0 Home Screen + Dynamic Boards)
-        musicStateManager = MusicStateManager(this).apply {
+        musicStateManager = MusicStateManager.getInstance(this).apply {
             setListener(object : MusicStateManager.Listener {
                 override fun onMusicStateUpdated(state: MusicState) {
                     mainHandler.post {
@@ -339,6 +339,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     private fun triggerVoiceWakeFromUi() {
         onUserInteractionWake()
         onWakeWordDetected(AppConfig.getWakeWord(this))
+        VoiceKioskService.triggerWake(this)
     }
 
     private fun handleSuggestionChipClicked(phrase: String) {

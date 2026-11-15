@@ -133,6 +133,18 @@ class AppConfigTest {
     }
 
     @Test
+    fun testExperimentalAecNsEnabled_defaultAndPersistence() {
+        val prefs = FakeSharedPreferences()
+        assertFalse("Default must be false", AppConfig.isExperimentalAecNsEnabled(prefs))
+
+        AppConfig.setExperimentalAecNsEnabled(prefs, true)
+        assertTrue(AppConfig.isExperimentalAecNsEnabled(prefs))
+
+        AppConfig.setExperimentalAecNsEnabled(prefs, false)
+        assertFalse(AppConfig.isExperimentalAecNsEnabled(prefs))
+    }
+
+    @Test
     fun testAppConfigContract_keyAndDefaults() {
         assertEquals("pref_ondevice_player_package", AppConfig.KEY_ONDEVICE_PLAYER_PACKAGE)
         assertEquals("", AppConfig.DEFAULT_ONDEVICE_PLAYER_PACKAGE)
