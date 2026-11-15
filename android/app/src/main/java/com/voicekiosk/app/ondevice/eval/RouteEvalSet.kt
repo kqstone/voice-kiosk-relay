@@ -204,7 +204,7 @@ object RouteEvalSet {
         cloud("cloud_ellipsis", "为什么", history = listOf(CLOUD))
         cloud("cloud_ellipsis", "那纽约呢", history = listOf(TIME))
         cloud("cloud_ellipsis", "那下周呢", history = listOf(W_BJ))
-        cloud("cloud_ellipsis", "那大后天呢", history = listOf(W_BJ))
+        loc("cloud_ellipsis", "那大后天呢", W, "city" to "北京", "day" to "day_3", history = listOf(W_BJ))
         cloud("cloud_ellipsis", "为什么这么冷", history = listOf(W_BJ))
         cloud("cloud_ellipsis", "那穿什么好", history = listOf(W_BJ))
         cloud("cloud_ellipsis", "他还有什么歌", history = listOf(PLAY_JAY))

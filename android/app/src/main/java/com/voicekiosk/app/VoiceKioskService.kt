@@ -48,6 +48,7 @@ import com.voicekiosk.app.ondevice.route.RuleRouter
 import com.voicekiosk.app.ondevice.route.TurnOrchestrator
 import com.voicekiosk.app.ondevice.tools.AndroidLocalPlatform
 import com.voicekiosk.app.ondevice.tools.LocalToolExecutor
+import com.voicekiosk.app.weather.WeatherRepository
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
@@ -1103,7 +1104,8 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
                 tools = LocalToolExecutor(
                     platform,
                     favoriteArtist = { memoryManager?.favoriteArtist() },
-                    weather = if (AppConfig.isOnDeviceWeatherEnabled(applicationContext)) com.voicekiosk.app.ondevice.tools.OpenMeteoWeatherSource() else null,
+                    weather = if (AppConfig.isOnDeviceWeatherEnabled(applicationContext)) com.voicekiosk.app.ondevice.tools.OpenMeteoWeatherSource(weatherRepo = WeatherRepository) else null,
+                    weatherRepo = WeatherRepository,
                     defaultCity = {
                         val name = AppConfig.getWeatherCity(applicationContext)
                         com.voicekiosk.app.ondevice.tools.City(
