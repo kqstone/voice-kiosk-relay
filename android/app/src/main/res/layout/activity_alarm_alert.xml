@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/alarmAlertRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/oled_black"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:paddingStart="32dp"
+    android:paddingTop="48dp"
+    android:paddingEnd="32dp"
+    android:paddingBottom="48dp">
+
+    <!-- Top spacer -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <!-- Huge digital clock display -->
+    <TextView
+        android:id="@+id/tvAlarmTime"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:text="07:00"
+        android:textColor="@color/text_white"
+        android:textSize="84sp"
+        android:textStyle="bold" />
+
+    <!-- Alarm Title / Label -->
+    <TextView
+        android:id="@+id/tvAlarmTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:gravity="center"
+        android:text="晨起闹钟"
+        android:textColor="@color/text_primary"
+        android:textSize="24sp" />
+
+    <!-- Voice Control Hint -->
+    <TextView
+        android:id="@+id/tvVoiceHint"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="28dp"
+        android:gravity="center"
+        android:text="可语音说“我知道了”关闭，或“稍后提醒”贪睡"
+        android:textColor="@color/text_secondary"
+        android:textSize="15sp" />
+
+    <!-- Middle spacer -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1.2" />
+
+    <!-- Action Buttons Row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center"
+        android:orientation="horizontal">
+
+        <!-- Snooze Button -->
+        <TextView
+            android:id="@+id/btnSnooze"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:layout_marginEnd="12dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_alarm_snooze"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="稍后提醒 (5分钟)"
+            android:textColor="@color/accent_amber"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <!-- Dismiss Button -->
+        <TextView
+            android:id="@+id/btnDismiss"
+            android:layout_width="0dp"
+            android:layout_height="56dp"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:background="@drawable/bg_alarm_dismiss"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:text="关闭"
+            android:textColor="@color/text_white"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+    </LinearLayout>
+
+</LinearLayout>

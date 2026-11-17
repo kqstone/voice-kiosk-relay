@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.voicekiosk.app.alarm.AlarmScheduler
 
 /**
  * Receiver to auto-start Voice Kiosk and its foreground listening service
@@ -30,6 +31,14 @@ class BootReceiver : BroadcastReceiver() {
                 Log.i(TAG, "VoiceKioskService started from boot receiver")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start VoiceKioskService from boot receiver", e)
+            }
+
+            // Reschedule every locally stored active alarm whose target time is still in the future
+            try {
+                val rescheduledCount = AlarmScheduler.rescheduleAllActiveAlarms(context)
+                Log.i(TAG, "Rescheduled $rescheduledCount active alarm(s) from boot receiver")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to reschedule active alarms from boot receiver", e)
             }
 
             // Launch MainActivity into foreground (Android 10+ requires foreground activity for real mic capture)
