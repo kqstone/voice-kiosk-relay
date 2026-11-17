@@ -288,7 +288,7 @@ items = list_schedules(
   {
     "id": "sch_112233445566",
     "type": "schedule",
-    "title": "带安安去图书馆",
+    "title": "去图书馆",
     "target_time_utc": 1773046800.0,
     "duration_seconds": 0,
     "recurrence": "",
@@ -317,4 +317,4 @@ items = list_schedules(
 #### Step 4: Spoken Feedback Formulation
 
 Muse converts the timestamps to local time and replies:
-> "您明天共有 2 项日程：\n1. 上午 10:00：带安安去图书馆\n2. 下午 3:00：家庭大扫除"
+> "您明天共有 2 项日程：\n1. 上午 10:00：去图书馆\n2. 下午 3:00：家庭大扫除"
