@@ -95,7 +95,11 @@ class LocalToolExecutor(
         platform: LocalPlatform,
         weather: WeatherSource?,
         defaultCity: () -> City?
-    ) : this(platform, weather, { null }, null, null, defaultCity)
+    ) : this(
+        platform = platform,
+        weather = weather,
+        defaultCity = defaultCity
+    )
 
     /** Null if the decision can be executed locally, else why not. */
     fun validate(d: RouteDecision): String? = when (d.intent) {

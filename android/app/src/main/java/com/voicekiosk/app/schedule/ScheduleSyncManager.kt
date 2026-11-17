@@ -9,6 +9,7 @@ import com.voicekiosk.app.alarm.AlarmScheduler
 import com.voicekiosk.app.alarm.LocalAlarmStore
 import com.voicekiosk.app.bridge.BridgeWebSocketClient
 import com.voicekiosk.app.countdown.CountdownManager
+import com.voicekiosk.app.countdown.CountdownState
 import org.json.JSONObject
 import java.net.URI
 import java.util.concurrent.Executors
@@ -370,12 +371,19 @@ class ScheduleSyncManager(
         val cachedItems = diskCache.getAllItems()
         val localAlarms = alarmStore.getAllAlarms().map { ScheduleItem.fromAlarmItem(it) }
 
-        // Phase 4 Countdown timers
+        // Phase 4 Countdown timers: CountdownState is a sealed class; active
+        // timers live in Running.allActive, the just-finished one in
+        // Completed.completedItem, the rest still running in Completed.remainingActive.
         val countdownState = CountdownManager.currentState
-        val activeCountdowns = countdownState.activeTimers.map { ScheduleItem.fromCountdownItem(it) }
-        val completedCountdown = countdownState.lastCompletedTimer?.let {
-            listOf(ScheduleItem.fromCountdownItem(it))
-        }.orEmpty()
+        val activeCountdowns = when (countdownState) {
+            is CountdownState.Running -> countdownState.allActive.map { ScheduleItem.fromCountdownItem(it) }
+            is CountdownState.Completed -> countdownState.remainingActive.map { ScheduleItem.fromCountdownItem(it) }
+            is CountdownState.Idle -> emptyList()
+        }
+        val completedCountdown = when (countdownState) {
+            is CountdownState.Completed -> listOf(ScheduleItem.fromCountdownItem(countdownState.completedItem))
+            else -> emptyList()
+        }
 
         // Merge by id (terminal state domination and last-write-wins)
         val combined = mutableMapOf<String, ScheduleItem>()
