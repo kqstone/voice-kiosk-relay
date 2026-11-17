@@ -26,6 +26,7 @@ class Settings:
     search_hourly_limit: int
     memory_enabled: bool
     memory_db_path: Path
+    schedule_db_path: Path
 
     def __init__(self) -> None:
         self.port = int(os.environ.get("PORT", "8093"))
@@ -62,6 +63,13 @@ class Settings:
             self.memory_db_path = Path(memory_db_env)
         else:
             self.memory_db_path = self.data_dir / "memory.db"
+
+        # Schedule settings
+        schedule_db_env = os.environ.get("SCHEDULE_DB_PATH", "").strip()
+        if schedule_db_env:
+            self.schedule_db_path = Path(schedule_db_env)
+        else:
+            self.schedule_db_path = self.data_dir / "schedules.db"
 
 
 settings = Settings()

@@ -21,6 +21,7 @@ from app.llm import (
     llm_client,
 )
 from app.memory_store import memory_store
+from app.schedule_store import schedule_store
 from app.queue import conversation_queue
 from app.router import route_question
 from app.storage import board_storage, routing_config_storage
@@ -539,6 +540,247 @@ def delete_memory(
             detail=f"Memory '{target_id}' not found",
         )
     return {"ok": True, "id": target_id}
+
+
+# ------------------------------------------------------------------------------
+# Schedules API (Phase 1: Unified Alarms, Countdown Timers, and Schedules)
+# ------------------------------------------------------------------------------
+
+class ScheduleCandidatesRequest(BaseModel):
+    candidates: list[dict[str, Any]] = []
+
+
+class CreateSchedulePayload(BaseModel):
+    id: str | None = None
+    type: str
+    title: str = ""
+    target_time_utc: float | None = None
+    duration_seconds: int = 0
+    recurrence: str = ""
+    status: str = "active"
+    origin: str = "muse_push"
+    metadata: dict[str, Any] = {}
+
+
+class UpdateSchedulePayload(BaseModel):
+    title: str | None = None
+    target_time_utc: float | None = None
+    duration_seconds: int | None = None
+    recurrence: str | None = None
+    status: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class ScheduleActionPayload(BaseModel):
+    action: str
+    snooze_seconds: int = 300
+
+
+_schedule_idempotency_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_schedule_idempotency_lock = threading.Lock()
+
+
+@app.get(
+    "/api/v1/schedules/snapshot",
+    dependencies=[Depends(verify_device_or_push_token)],
+)
+def get_schedule_snapshot(
+    since: str = "",
+    type: str | None = None,
+) -> dict[str, Any]:
+    return schedule_store.get_snapshot(since=since, type_filter=type)
+
+
+@app.post(
+    "/api/v1/schedules/candidates",
+    dependencies=[Depends(verify_device_token)],
+)
+async def submit_schedule_candidates(
+    payload: ScheduleCandidatesRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
+    key = idempotency_key.strip() if idempotency_key else ""
+    if key:
+        with _schedule_idempotency_lock:
+            now = time.time()
+            expired = [
+                k
+                for k, (ts, _) in _schedule_idempotency_cache.items()
+                if now - ts > IDEMPOTENCY_TTL_SECONDS
+            ]
+            for k in expired:
+                del _schedule_idempotency_cache[k]
+            if key in _schedule_idempotency_cache:
+                return _schedule_idempotency_cache[key][1]
+
+    raw_candidates = [
+        c if isinstance(c, dict) else c.model_dump()
+        for c in payload.candidates
+    ]
+    res = schedule_store.submit_candidates(raw_candidates)
+
+    if res.get("changed"):
+        for r in res.get("results", []):
+            if r.get("status") in ("created", "updated") and "item" in r:
+                item = r["item"]
+                await manager.broadcast({
+                    "type": "schedule_update",
+                    "action": "upsert",
+                    "item_id": item["id"],
+                    "updated_at": item["updated_at_utc"],
+                })
+
+    if key:
+        with _schedule_idempotency_lock:
+            if len(_schedule_idempotency_cache) >= MAX_IDEMPOTENCY_ENTRIES:
+                oldest_k = min(
+                    _schedule_idempotency_cache.keys(),
+                    key=lambda k: _schedule_idempotency_cache[k][0],
+                )
+                del _schedule_idempotency_cache[oldest_k]
+            _schedule_idempotency_cache[key] = (time.time(), res)
+
+    return res
+
+
+@app.post(
+    "/api/v1/schedules",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(verify_device_or_push_token)],
+)
+async def create_schedule_item(
+    payload: CreateSchedulePayload,
+) -> dict[str, Any]:
+    try:
+        item = schedule_store.create_schedule(payload.model_dump())
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    await manager.broadcast({
+        "type": "schedule_update",
+        "action": "upsert",
+        "item_id": item["id"],
+        "updated_at": item["updated_at_utc"],
+    })
+    return item
+
+
+@app.get(
+    "/api/v1/schedules",
+    dependencies=[Depends(verify_device_or_push_token)],
+)
+def list_schedule_items(
+    type: str | None = None,
+    status: str | None = None,
+    from_utc: float | None = None,
+    to_utc: float | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
+    return schedule_store.list_schedules(
+        type=type,
+        status=status,
+        from_utc=from_utc,
+        to_utc=to_utc,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@app.get(
+    "/api/v1/schedules/{id}",
+    dependencies=[Depends(verify_device_or_push_token)],
+)
+def get_schedule_item(id: str) -> dict[str, Any]:
+    item = schedule_store.get_schedule(id)
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Schedule '{id}' not found",
+        )
+    return item
+
+
+@app.put(
+    "/api/v1/schedules/{id}",
+    dependencies=[Depends(verify_device_or_push_token)],
+)
+async def update_schedule_item(
+    id: str,
+    payload: UpdateSchedulePayload,
+) -> dict[str, Any]:
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    try:
+        updated = schedule_store.update_schedule(id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Schedule '{id}' not found",
+        )
+
+    await manager.broadcast({
+        "type": "schedule_update",
+        "action": "upsert",
+        "item_id": id,
+        "updated_at": updated["updated_at_utc"],
+    })
+    return updated
+
+
+@app.delete(
+    "/api/v1/schedules/{id}",
+    dependencies=[Depends(verify_device_or_push_token)],
+)
+async def delete_schedule_item(id: str) -> dict[str, Any]:
+    deleted = schedule_store.delete_schedule(id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Schedule '{id}' not found",
+        )
+    now = time.time()
+    await manager.broadcast({
+        "type": "schedule_update",
+        "action": "delete",
+        "item_id": id,
+        "updated_at": now,
+    })
+    return {"ok": True, "id": id}
+
+
+@app.post(
+    "/api/v1/schedules/{id}/action",
+    dependencies=[Depends(verify_device_or_push_token)],
+)
+async def execute_schedule_action(
+    id: str,
+    payload: ScheduleActionPayload,
+) -> dict[str, Any]:
+    try:
+        updated = schedule_store.apply_action(
+            schedule_id=id,
+            action=payload.action,
+            snooze_seconds=payload.snooze_seconds,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Schedule '{id}' not found",
+        )
+
+    await manager.broadcast({
+        "type": "schedule_update",
+        "action": "upsert",
+        "item_id": id,
+        "updated_at": updated["updated_at_utc"],
+    })
+    return updated
 
 
 @app.get("/", response_class=HTMLResponse)
