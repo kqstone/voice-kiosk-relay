@@ -143,6 +143,7 @@ class ScheduleSyncManager(
                         reset = false
                     )
                 }
+                reconcileAlarmsWithSnapshot(snap.items, snap.deletedIds)
                 notifyUpdated()
             } else {
                 val err = snapResult.exceptionOrNull()
@@ -168,6 +169,7 @@ class ScheduleSyncManager(
                             newCursor = fullSnap.cursor,
                             reset = true
                         )
+                        reconcileAlarmsWithSnapshot(fullSnap.items, fullSnap.deletedIds)
                         notifyUpdated()
                     } else if (!silent) {
                         Log.e(TAG, "Full resync fallback failed: ${fullResult.exceptionOrNull()?.message}")
@@ -176,6 +178,50 @@ class ScheduleSyncManager(
                     Log.w(TAG, "Schedule snapshot fetch failed: ${err?.message}")
                 }
             }
+        }
+    }
+
+    /**
+     * Executes defensive reconciliation between local alarms and bridge snapshot.
+     * Prefers bridge state and logs every detected conflict.
+     */
+    private fun reconcileAlarmsWithSnapshot(
+        incomingItems: List<ScheduleItem>,
+        deletedIds: Collection<String>
+    ) {
+        try {
+            val localAlarms = alarmStore.getAllAlarms()
+            val plan = ScheduleSyncLogic.reconcileLocalAlarmsWithBridge(
+                localAlarms = localAlarms,
+                bridgeItems = incomingItems,
+                deletedBridgeIds = deletedIds
+            )
+
+            // Log conflicts
+            for (c in plan.conflicts) {
+                Log.w(TAG, "Schedule conflict detected: ${c.reason}")
+            }
+
+            // Cancel any alarms that were deleted or became terminal on bridge
+            for (id in plan.alarmsToCancel) {
+                AlarmScheduler.cancelAlarm(context, id)
+            }
+
+            // Remove physically deleted alarms
+            for (id in plan.alarmsToDelete) {
+                alarmStore.deleteAlarm(id)
+            }
+
+            // Save and schedule preferred bridge alarms
+            val nowMs = System.currentTimeMillis()
+            for (item in plan.alarmsToSave) {
+                alarmStore.saveAlarm(item)
+                if (item.isActive && item.targetTimeMillis > nowMs) {
+                    AlarmScheduler.scheduleAlarm(context, item)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error reconciling local alarms with bridge snapshot", e)
         }
     }
 

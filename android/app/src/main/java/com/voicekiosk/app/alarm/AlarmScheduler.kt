@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 
@@ -79,6 +80,61 @@ object AlarmScheduler {
             true
         } catch (e: Exception) {
             Log.w(TAG, "Failed to launch exact alarm settings, falling back to app settings", e)
+            try {
+                val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(fallback)
+                true
+            } catch (fallbackEx: Exception) {
+                Log.e(TAG, "Failed to launch fallback app details settings", fallbackEx)
+                false
+            }
+        }
+    }
+
+    /**
+     * Checks if the app is whitelisted from battery optimizations.
+     * On Android 6.0+ (API 23+), delegates to PowerManager.isIgnoringBatteryOptimizations().
+     * On earlier versions, always returns true.
+     */
+    fun isIgnoringBatteryOptimizations(context: Context): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return true
+            pm.isIgnoringBatteryOptimizations(context.packageName)
+        } else {
+            true
+        }
+    }
+
+    /**
+     * Constructs the Intent to request battery optimization whitelist or open power settings.
+     */
+    fun getBatteryOptimizationSettingIntent(context: Context): Intent {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:${context.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.parse("package:${context.packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        }
+    }
+
+    /**
+     * Safely opens battery optimization whitelist request or application details settings.
+     */
+    fun openBatteryOptimizationSettings(context: Context): Boolean {
+        return try {
+            val intent = getBatteryOptimizationSettingIntent(context)
+            context.startActivity(intent)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to launch battery optimization request, falling back to app settings", e)
             try {
                 val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                     data = Uri.parse("package:${context.packageName}")

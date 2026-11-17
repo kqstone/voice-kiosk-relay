@@ -285,4 +285,110 @@ class ScheduleSyncLogicTest {
         assertEquals(alarm.id, roundTripAlarm.id)
         assertEquals(alarm.status, roundTripAlarm.status)
     }
+
+    @Test
+    fun testReconciliation_localAlarmDeletedOnBridge_cancelsAndDeletesLocal() {
+        val local = AlarmItem(
+            id = "sch_alarm_del_1",
+            title = "Morning alarm",
+            targetTimeUtc = 1731884400.0,
+            status = AlarmItem.STATUS_ACTIVE
+        )
+
+        val plan = ScheduleSyncLogic.reconcileLocalAlarmsWithBridge(
+            localAlarms = listOf(local),
+            bridgeItems = emptyList(),
+            deletedBridgeIds = listOf("sch_alarm_del_1")
+        )
+
+        assertEquals(1, plan.conflicts.size)
+        assertEquals("sch_alarm_del_1", plan.conflicts[0].id)
+        assertTrue(plan.conflicts[0].reason.contains("deleted on bridge"))
+        assertEquals(listOf("sch_alarm_del_1"), plan.alarmsToCancel)
+        assertEquals(listOf("sch_alarm_del_1"), plan.alarmsToDelete)
+        assertTrue(plan.alarmsToSave.isEmpty())
+    }
+
+    @Test
+    fun testReconciliation_statusDisagreement_prefersBridgeState() {
+        // Local is active, bridge is cancelled
+        val local = AlarmItem(
+            id = "sch_alarm_stat_1",
+            title = "Meeting Reminder",
+            targetTimeUtc = 1731884400.0,
+            status = AlarmItem.STATUS_ACTIVE
+        )
+        val bridge = ScheduleItem(
+            id = "sch_alarm_stat_1",
+            type = ScheduleItem.TYPE_ALARM,
+            title = "Meeting Reminder",
+            targetTimeUtc = 1731884400.0,
+            status = ScheduleItem.STATUS_CANCELLED,
+            origin = ScheduleItem.ORIGIN_MUSE_VOICE
+        )
+
+        val plan = ScheduleSyncLogic.reconcileLocalAlarmsWithBridge(
+            localAlarms = listOf(local),
+            bridgeItems = listOf(bridge),
+            deletedBridgeIds = emptyList()
+        )
+
+        assertEquals(1, plan.conflicts.size)
+        assertTrue(plan.conflicts[0].reason.contains("preferring bridge state"))
+        assertEquals(listOf("sch_alarm_stat_1"), plan.alarmsToCancel)
+        assertEquals(1, plan.alarmsToSave.size)
+        assertEquals(AlarmItem.STATUS_CANCELLED, plan.alarmsToSave[0].status)
+    }
+
+    @Test
+    fun testReconciliation_targetTimeDisagreement_prefersBridgeState() {
+        val local = AlarmItem(
+            id = "sch_alarm_time_1",
+            title = "Gym Alarm",
+            targetTimeUtc = 1731884400.0,
+            status = AlarmItem.STATUS_ACTIVE
+        )
+        val bridge = ScheduleItem(
+            id = "sch_alarm_time_1",
+            type = ScheduleItem.TYPE_ALARM,
+            title = "Gym Alarm",
+            targetTimeUtc = 1731888000.0, // 1 hour later
+            status = ScheduleItem.STATUS_ACTIVE,
+            origin = ScheduleItem.ORIGIN_MUSE_VOICE
+        )
+
+        val plan = ScheduleSyncLogic.reconcileLocalAlarmsWithBridge(
+            localAlarms = listOf(local),
+            bridgeItems = listOf(bridge),
+            deletedBridgeIds = emptyList()
+        )
+
+        assertEquals(1, plan.conflicts.size)
+        assertTrue(plan.conflicts[0].reason.contains("target local="))
+        assertEquals(1, plan.alarmsToSave.size)
+        assertEquals(1731888000.0, plan.alarmsToSave[0].targetTimeUtc, 0.001)
+    }
+
+    @Test
+    fun testReconciliation_newBridgeAlarm_discoversAndSaves() {
+        val bridgeNew = ScheduleItem(
+            id = "sch_bridge_new_1",
+            type = ScheduleItem.TYPE_ALARM,
+            title = "Muse scheduled alarm",
+            targetTimeUtc = 1731900000.0,
+            status = ScheduleItem.STATUS_ACTIVE,
+            origin = ScheduleItem.ORIGIN_MUSE_VOICE
+        )
+
+        val plan = ScheduleSyncLogic.reconcileLocalAlarmsWithBridge(
+            localAlarms = emptyList(),
+            bridgeItems = listOf(bridgeNew),
+            deletedBridgeIds = emptyList()
+        )
+
+        assertEquals(0, plan.conflicts.size)
+        assertEquals(1, plan.alarmsToSave.size)
+        assertEquals("sch_bridge_new_1", plan.alarmsToSave[0].id)
+        assertEquals(AlarmItem.STATUS_ACTIVE, plan.alarmsToSave[0].status)
+    }
 }

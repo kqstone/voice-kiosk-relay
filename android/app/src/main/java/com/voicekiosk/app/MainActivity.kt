@@ -36,10 +36,12 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.viewpager2.widget.ViewPager2
+import com.voicekiosk.app.alarm.AlarmScheduler
 import com.voicekiosk.app.bridge.OriginBoundHost
 import com.voicekiosk.app.countdown.CountdownManager
 import com.voicekiosk.app.countdown.CountdownState
@@ -162,8 +164,8 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         // 5. Setup Network Callback for Auto-reconnect & Weather refresh
         setupNetworkMonitoring()
 
-        // 6. Check battery optimization whitelist
-        promptBatteryOptimizationWhitelist()
+        // 6. Check battery optimization whitelist and exact alarm permissions
+        checkKeepAliveAndPermissions()
 
         // 7. Request audio permission & start voice service
         checkAndRequestAudioPermission()
@@ -190,6 +192,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         applyImmersiveMode()
         updateDisplayPowerAndAodState()
         refreshWeather(force = false)
+        checkKeepAliveAndPermissions()
         if (::musicStateManager.isInitialized) {
             musicStateManager.checkAndUpdateState()
         }
@@ -567,6 +570,45 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             Log.e(TAG, "Error unregistering network callback", e)
         }
         networkCallback = null
+    }
+
+    private var lastKeepAliveWarningMs: Long = 0L
+
+    /**
+     * In-app check that detects when exact-alarm permission or battery whitelist is missing,
+     * surfacing an on-screen toast and a spoken prompt.
+     */
+    private fun checkKeepAliveAndPermissions() {
+        try {
+            val exactAlarmOk = AlarmScheduler.canScheduleExactAlarms(this)
+            val batteryOptOk = AlarmScheduler.isIgnoringBatteryOptimizations(this)
+
+            if (!exactAlarmOk || !batteryOptOk) {
+                val missingParts = mutableListOf<String>()
+                if (!exactAlarmOk) missingParts.add("精确闹钟")
+                if (!batteryOptOk) missingParts.add("忽略电池优化")
+                val missingText = missingParts.joinToString("和")
+
+                val prompt = "请为 Voice Kiosk 开启${missingText}权限，以保证闹钟准时响铃与后台稳定运行。"
+                Log.w(TAG, "Keep-alive permission check: $missingText missing")
+
+                // Surface clear on-screen prompt
+                Toast.makeText(this, prompt, Toast.LENGTH_LONG).show()
+
+                // Surface spoken prompt at most once per 60 seconds
+                val now = System.currentTimeMillis()
+                if (now - lastKeepAliveWarningMs > 60_000L) {
+                    lastKeepAliveWarningMs = now
+                    VoiceKioskService.speakFromHost("请为 Voice Kiosk 开启${missingText}权限，以保证闹钟准时响铃。")
+                }
+
+                if (!batteryOptOk) {
+                    promptBatteryOptimizationWhitelist()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed in checkKeepAliveAndPermissions", e)
+        }
     }
 
     private fun promptBatteryOptimizationWhitelist() {

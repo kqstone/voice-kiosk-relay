@@ -1,11 +1,31 @@
 package com.voicekiosk.app.schedule
 
+import com.voicekiosk.app.alarm.AlarmItem
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import kotlin.math.abs
+
+/** Disagreement between a local alarm record and its bridge counterpart. */
+data class AlarmConflict(
+    val id: String,
+    val localStatus: String,
+    val bridgeStatus: String,
+    val localTargetTimeUtc: Double,
+    val bridgeTargetTimeUtc: Double,
+    val reason: String
+)
+
+/** Reconciliation actions after resolving conflicts in favor of bridge state. */
+data class AlarmReconciliationPlan(
+    val conflicts: List<AlarmConflict>,
+    val alarmsToCancel: List<String>,
+    val alarmsToSave: List<AlarmItem>,
+    val alarmsToDelete: List<String>
+)
 
 /**
  * Pure functions governing synchronization logic, cursor math, terminal state domination,
@@ -158,6 +178,103 @@ object ScheduleSyncLogic {
             status = ScheduleItem.STATUS_COMPLETED,
             updatedAtUtc = nowSeconds,
             metadata = newMeta
+        )
+    }
+
+    /**
+     * Defensive reconciliation between local AlarmItem records and bridge ScheduleItem counterparts.
+     * When local and bridge disagree, prefers bridge state and reports conflicts for logging.
+     *
+     * Rules per plan §3.4 and Phase 7 hardening:
+     * 1. If local alarm was deleted on bridge (in deletedBridgeIds), cancel local alarm, delete from store.
+     * 2. If matching bridge alarm exists and disagrees in status, target time, title, or recurrence:
+     *    - Conflict logged.
+     *    - Prefer bridge state!
+     *    - If bridge is terminal, cancel local alarm and update store to terminal status.
+     *    - If bridge is active, update store and re-schedule.
+     * 3. If bridge has a new active alarm not present locally, save and schedule it.
+     */
+    fun reconcileLocalAlarmsWithBridge(
+        localAlarms: List<AlarmItem>,
+        bridgeItems: List<ScheduleItem>,
+        deletedBridgeIds: Collection<String>
+    ): AlarmReconciliationPlan {
+        val deletedSet = deletedBridgeIds.toSet()
+        val conflicts = mutableListOf<AlarmConflict>()
+        val alarmsToCancel = mutableListOf<String>()
+        val alarmsToSave = mutableListOf<AlarmItem>()
+        val alarmsToDelete = mutableListOf<String>()
+
+        val bridgeAlarmMap = bridgeItems.filter { it.type == ScheduleItem.TYPE_ALARM }.associateBy { it.id }
+
+        // 1. Process local alarms against bridge state and deletions
+        for (local in localAlarms) {
+            if (local.id in deletedSet) {
+                conflicts.add(
+                    AlarmConflict(
+                        id = local.id,
+                        localStatus = local.status,
+                        bridgeStatus = "DELETED",
+                        localTargetTimeUtc = local.targetTimeUtc,
+                        bridgeTargetTimeUtc = 0.0,
+                        reason = "Local alarm ${local.id} was deleted on bridge; cancelling local alarm"
+                    )
+                )
+                alarmsToCancel.add(local.id)
+                alarmsToDelete.add(local.id)
+                continue
+            }
+
+            val bridge = bridgeAlarmMap[local.id]
+            if (bridge != null) {
+                val statusMismatch = local.status != bridge.status
+                val targetMismatch = abs(local.targetTimeUtc - bridge.targetTimeUtc) > 1e-3
+                val titleMismatch = local.title != bridge.title
+                val recurrenceMismatch = local.recurrence != bridge.recurrence
+
+                if (statusMismatch || targetMismatch || titleMismatch || recurrenceMismatch) {
+                    val reasons = mutableListOf<String>()
+                    if (statusMismatch) reasons.add("status local='${local.status}' vs bridge='${bridge.status}'")
+                    if (targetMismatch) reasons.add("target local=${local.targetTimeUtc} vs bridge=${bridge.targetTimeUtc}")
+                    if (titleMismatch) reasons.add("title local='${local.title}' vs bridge='${bridge.title}'")
+                    if (recurrenceMismatch) reasons.add("recurrence local='${local.recurrence}' vs bridge='${bridge.recurrence}'")
+
+                    conflicts.add(
+                        AlarmConflict(
+                            id = local.id,
+                            localStatus = local.status,
+                            bridgeStatus = bridge.status,
+                            localTargetTimeUtc = local.targetTimeUtc,
+                            bridgeTargetTimeUtc = bridge.targetTimeUtc,
+                            reason = "Conflict on alarm ${local.id}: ${reasons.joinToString(", ")}; preferring bridge state"
+                        )
+                    )
+
+                    // Prefer bridge state
+                    val preferred = bridge.toAlarmItem()
+                    alarmsToSave.add(preferred)
+                    if (bridge.isTerminal) {
+                        alarmsToCancel.add(local.id)
+                    }
+                }
+            }
+        }
+
+        // 2. Discover bridge alarms not present locally
+        val localIdSet = localAlarms.map { it.id }.toSet()
+        for ((bridgeId, bridge) in bridgeAlarmMap) {
+            if (bridgeId !in localIdSet && bridgeId !in deletedSet) {
+                if (bridge.status == ScheduleItem.STATUS_ACTIVE) {
+                    alarmsToSave.add(bridge.toAlarmItem())
+                }
+            }
+        }
+
+        return AlarmReconciliationPlan(
+            conflicts = conflicts,
+            alarmsToCancel = alarmsToCancel.distinct(),
+            alarmsToSave = alarmsToSave.distinctBy { it.id },
+            alarmsToDelete = alarmsToDelete.distinct()
         )
     }
 }
