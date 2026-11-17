@@ -24,6 +24,7 @@ import com.voicekiosk.app.data.BoardComponent
 import com.voicekiosk.app.data.BoardModel
 import com.voicekiosk.app.media.MediaControlAction
 import com.voicekiosk.app.media.MusicState
+import com.voicekiosk.app.media.MusicVisibilityPolicy
 import com.voicekiosk.app.schedule.ScheduleItem
 
 /**
@@ -191,7 +192,8 @@ class MainPagerAdapter(
         when (holder) {
             is HomeViewHolder -> {
                 activeHomeViewHolder = holder
-                holder.bind(musicState, isMusicVisible = musicState?.isPlaying == true)
+                val shouldShow = MusicVisibilityPolicy.shouldShowCard(musicState)
+                holder.bind(musicState, isMusicVisible = shouldShow)
             }
             is ScheduleViewHolder -> {
                 activeScheduleViewHolder = holder
@@ -422,6 +424,19 @@ class MainPagerAdapter(
         private var tvSlideHint: TextView? = null
         private var tvWakePrompt: TextView? = null
 
+        private var layoutWeatherDetails: View? = null
+        private var layoutWeatherForecast: View? = null
+        private var layoutRightContainer: ViewGroup? = null
+
+        private var tvApparentTemp: TextView? = null
+        private var tvHumidity: TextView? = null
+        private var tvWind: TextView? = null
+        private var tvSun: TextView? = null
+        private var tvAqiBadge: TextView? = null
+        private var recyclerForecast5Day: RecyclerView? = null
+        private var forecastAdapter: Forecast5DayAdapter? = null
+        private var lastBoundWeatherInfo: WeatherInfo? = null
+
         var musicWidgetController: HomeMusicWidgetController? = null
             private set
 
@@ -482,6 +497,26 @@ class MainPagerAdapter(
             tvSlideHint = root.findViewById(R.id.tvSlideHint)
             tvWakePrompt = root.findViewById(R.id.tvWakePrompt)
 
+            layoutWeatherDetails = root.findViewById(R.id.layoutWeatherDetails)
+            layoutWeatherForecast = root.findViewById(R.id.layoutWeatherForecast)
+            layoutRightContainer = root.findViewById(R.id.layoutRightContainer)
+
+            tvApparentTemp = root.findViewById(R.id.tvApparentTemp)
+            tvHumidity = root.findViewById(R.id.tvHumidity)
+            tvWind = root.findViewById(R.id.tvWind)
+            tvSun = root.findViewById(R.id.tvSun)
+            tvAqiBadge = root.findViewById(R.id.tvAqiBadge)
+            recyclerForecast5Day = root.findViewById(R.id.recyclerForecast5Day)
+
+            recyclerForecast5Day?.let { rv ->
+                try {
+                    rv.layoutManager = LinearLayoutManager(rv.context)
+                    val adapter = Forecast5DayAdapter()
+                    forecastAdapter = adapter
+                    rv.adapter = adapter
+                } catch (_: Throwable) {}
+            }
+
             val widgetView: View? = root.findViewById(R.id.layoutNowPlaying)
             musicWidgetController = if (widgetView != null) {
                 try {
@@ -528,7 +563,10 @@ class MainPagerAdapter(
                 bindViews(container)
             }
 
-            // Rebind state with new views
+            // Restore cached weather state immediately without network overhead
+            lastBoundWeatherInfo?.let { bindWeatherInfo(it) }
+
+            // Rebind state with new views - animate = false strictly avoids secondary animation/flash
             bind(currentMusicState, isMusicVisible)
 
             if (isAttachedToWindow) {
@@ -539,11 +577,12 @@ class MainPagerAdapter(
             }
         }
 
-        fun bind(musicState: MusicState? = null, isMusicVisible: Boolean = false) {
+        fun bind(musicState: MusicState? = null, isMusicVisible: Boolean? = null) {
             if (musicState != null) {
                 currentMusicState = musicState
             }
-            this.isMusicVisible = isMusicVisible
+            val targetVisibility = isMusicVisible ?: MusicVisibilityPolicy.shouldShowCard(currentMusicState)
+            this.isMusicVisible = targetVisibility
 
             val currentOrientation = try {
                 itemView.resources?.configuration?.orientation ?: Configuration.ORIENTATION_UNDEFINED
@@ -589,12 +628,22 @@ class MainPagerAdapter(
                         if (parsed != null) {
                             bindWeatherInfo(parsed)
                         } else {
-                            tvWeatherIcon?.text = "⛅"
+                            try {
+                                tvWeatherIcon?.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_weather_cloudy, 0, 0, 0)
+                                tvWeatherIcon?.text = ""
+                            } catch (_: Throwable) {
+                                tvWeatherIcon?.text = "⛅"
+                            }
                             tvWeatherTemp?.text = "--°"
                             tvWeatherDesc?.text = summary
                         }
                     } else {
-                        tvWeatherIcon?.text = "⛅"
+                        try {
+                            tvWeatherIcon?.setCompoundDrawablesWithIntrinsicBounds(R.drawable.ic_weather_cloudy, 0, 0, 0)
+                            tvWeatherIcon?.text = ""
+                        } catch (_: Throwable) {
+                            tvWeatherIcon?.text = "⛅"
+                        }
                         tvWeatherTemp?.text = "--°"
                         tvWeatherDesc?.text = "正在获取天气..."
                     }
@@ -605,12 +654,14 @@ class MainPagerAdapter(
             if (stateToBind != null) {
                 musicWidgetController?.bind(stateToBind)
             }
+            setMusicCardVisible(this.isMusicVisible, animate = false)
             syncWidgetVisibilities(animate = false)
         }
 
         fun updateMusicState(state: MusicState) {
             currentMusicState = state
-            isMusicVisible = state.isPlaying
+            val shouldShowCard = MusicVisibilityPolicy.shouldShowCard(state)
+            setMusicCardVisible(shouldShowCard)
             musicWidgetController?.bind(state)
             syncWidgetVisibilities(animate = true)
         }
@@ -618,12 +669,90 @@ class MainPagerAdapter(
         fun setMusicVisibility(visible: Boolean, state: MusicState? = null) {
             if (state != null) {
                 currentMusicState = state
-            }
-            isMusicVisible = visible
-            if (state != null) {
                 musicWidgetController?.bind(state)
             }
+            setMusicCardVisible(visible, animate = true)
             syncWidgetVisibilities(animate = true)
+        }
+
+        fun setMusicCardVisible(shouldShowCard: Boolean, animate: Boolean = true) {
+            isMusicVisible = shouldShowCard
+            musicWidgetController?.setVisible(shouldShowCard, animate = animate)
+
+            val detailsView = layoutWeatherDetails
+            val forecastView = layoutWeatherForecast
+            val isLand = isLandscapeLayout()
+
+            if (!animate || itemView.isAttachedToWindow != true) {
+                if (shouldShowCard) {
+                    detailsView?.visibility = View.GONE
+                    detailsView?.alpha = 0f
+                    forecastView?.visibility = View.GONE
+                    forecastView?.alpha = 0f
+                } else {
+                    detailsView?.visibility = View.VISIBLE
+                    detailsView?.alpha = 1f
+                    forecastView?.visibility = View.VISIBLE
+                    forecastView?.alpha = 1f
+                }
+                return
+            }
+
+            if (isLand) {
+                // Cross-Fade in Landscape: 5-day forecast fades out (250ms), music card fades in
+                if (shouldShowCard) {
+                    try {
+                        forecastView?.animate()?.alpha(0f)?.setDuration(250L)?.withEndAction {
+                            forecastView.visibility = View.GONE
+                        }?.start()
+                        detailsView?.animate()?.alpha(0f)?.setDuration(250L)?.withEndAction {
+                            detailsView.visibility = View.GONE
+                        }?.start()
+                    } catch (_: Throwable) {
+                        forecastView?.visibility = View.GONE
+                        detailsView?.visibility = View.GONE
+                    }
+                } else {
+                    try {
+                        forecastView?.visibility = View.VISIBLE
+                        forecastView?.alpha = 0f
+                        forecastView?.animate()?.alpha(1f)?.setDuration(250L)?.start()
+
+                        detailsView?.visibility = View.VISIBLE
+                        detailsView?.alpha = 0f
+                        detailsView?.animate()?.alpha(1f)?.setDuration(250L)?.start()
+                    } catch (_: Throwable) {
+                        forecastView?.visibility = View.VISIBLE
+                        forecastView?.alpha = 1f
+                        detailsView?.visibility = View.VISIBLE
+                        detailsView?.alpha = 1f
+                    }
+                }
+            } else {
+                // Accordion height collapse in Portrait via TransitionManager
+                try {
+                    val container = itemView as? ViewGroup
+                    if (container != null && container.isAttachedToWindow) {
+                        val transition = android.transition.TransitionSet().apply {
+                            ordering = android.transition.TransitionSet.ORDERING_TOGETHER
+                            addTransition(android.transition.ChangeBounds())
+                            addTransition(android.transition.Fade())
+                            duration = 250L
+                        }
+                        android.transition.TransitionManager.beginDelayedTransition(container, transition)
+                    }
+                } catch (_: Throwable) {}
+
+                if (shouldShowCard) {
+                    detailsView?.visibility = View.GONE
+                    forecastView?.visibility = View.GONE
+                } else {
+                    detailsView?.visibility = View.VISIBLE
+                    detailsView?.alpha = 1f
+                    forecastView?.visibility = View.VISIBLE
+                    forecastView?.alpha = 1f
+                }
+            }
         }
 
         fun onAttached() {
@@ -748,14 +877,53 @@ class MainPagerAdapter(
         }
 
         fun bindWeatherInfo(info: WeatherInfo) {
-            tvWeatherIcon?.text = info.iconSymbol
-            tvWeatherTemp?.text = "${info.temperatureC}°"
-            val desc = if (info.minTempC != null && info.maxTempC != null) {
-                "${info.conditionZh} · 空气优 | ${info.minTempC}° / ${info.maxTempC}°"
-            } else {
-                "${info.conditionZh} · ${info.city}"
+            lastBoundWeatherInfo = info
+            try {
+                tvWeatherIcon?.setCompoundDrawablesWithIntrinsicBounds(info.iconRes, 0, 0, 0)
+                tvWeatherIcon?.text = ""
+            } catch (_: Throwable) {
+                tvWeatherIcon?.text = info.iconSymbol
             }
-            tvWeatherDesc?.text = desc
+            tvWeatherTemp?.text = "${info.temperatureC}°"
+            val range = if (info.minTempC != null && info.maxTempC != null) {
+                "${info.minTempC}°~${info.maxTempC}°"
+            } else {
+                null
+            }
+            val aqiPart = if (info.aqi != null && !info.aqiLevelZh.isNullOrBlank()) {
+                "AQI ${info.aqi} ${info.aqiLevelZh}"
+            } else {
+                null
+            }
+            tvWeatherDesc?.text = listOfNotNull(
+                info.city.takeIf { it.isNotBlank() },
+                info.conditionZh,
+                range,
+                aqiPart
+            ).joinToString(" · ")
+
+            // Bind Today Weather Details
+            tvApparentTemp?.text = info.apparentTempC?.let { "体感 ${it}°" } ?: "体感 --°"
+            tvHumidity?.text = info.relativeHumidity?.let { "湿度 ${it}%" } ?: "湿度 --%"
+            tvWind?.text = info.windSpeedKmh?.let { "风速 ${it.toInt()} km/h" } ?: "风速 --"
+            val sunStr = listOfNotNull(
+                WeatherManager.formatSunTime(info.sunrise)?.let { "日出 $it" },
+                WeatherManager.formatSunTime(info.sunset)?.let { "日落 $it" }
+            ).joinToString(" · ")
+            tvSun?.text = if (sunStr.isNotBlank()) sunStr else "日出 -- · 日落 --"
+
+            // AQI Badge: strictly GONE when null / invalid
+            if (info.aqi != null && !info.aqiLevelZh.isNullOrBlank()) {
+                tvAqiBadge?.visibility = View.VISIBLE
+                tvAqiBadge?.text = "AQI ${info.aqi} ${info.aqiLevelZh}"
+            } else {
+                tvAqiBadge?.visibility = View.GONE
+            }
+
+            // 5-Day forecast list
+            if (info.forecastDays.isNotEmpty()) {
+                forecastAdapter?.updateItems(info.forecastDays.take(5))
+            }
         }
 
         fun isLandscapeLayout(): Boolean {
@@ -768,5 +936,9 @@ class MainPagerAdapter(
         fun getDateLine(): TextView? = tvDateLine
         fun getTextClock(): TextClock? = textClock
         fun getWeatherCapsule(): LinearLayout? = weatherCapsule
+        fun getLayoutWeatherDetails(): View? = layoutWeatherDetails
+        fun getLayoutWeatherForecast(): View? = layoutWeatherForecast
+        fun getLayoutRightContainer(): ViewGroup? = layoutRightContainer
+        fun isMusicCardVisible(): Boolean = isMusicVisible
     }
 }

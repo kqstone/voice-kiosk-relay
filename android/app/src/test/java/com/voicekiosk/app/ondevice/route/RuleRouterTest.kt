@@ -315,7 +315,7 @@ class RuleRouterTest {
     @Test
     fun weatherNegatives() {
         // junk "cities", other days, advice: never a local weather rule
-        for (t in listOf("小区天气怎么样", "下周天气怎么样", "周末天气", "昨天天气怎么样", "大后天天气", "明天适合爬山吗",
+        for (t in listOf("小区天气怎么样", "下周天气怎么样", "周末天气", "昨天天气怎么样", "明天适合爬山吗",
                 "天气真好", "我喜欢下雨天", "外面下雨了")) {
             none(t)
         }
@@ -331,7 +331,7 @@ class RuleRouterTest {
         local("明天会下雨吗", Intents.WEATHER, "day" to "tomorrow", "kind" to "rain", "city" to "北京", prev = prev)
         none("那明天呢")
         none("那下周呢", prev)
-        none("那大后天呢", prev)
+        local("那大后天呢", Intents.WEATHER, "day" to "day_3", "kind" to "general", "city" to "北京", prev = prev)
         none("那小区呢", prev)
         val prevTime = RouteDecision(Intents.TIME, mapOf("kind" to "time"), Route.LOCAL, 0.98, RouteSource.RULE)
         none("那上海呢", prevTime)
@@ -428,8 +428,12 @@ class RuleRouterTest {
         local("明天出门要带伞不", Intents.WEATHER, "day" to "tomorrow", "kind" to "rain")
         local("看看武汉后天天气", Intents.WEATHER, "day" to "after_tomorrow", "kind" to "general", "city" to "武汉")
         local("查一下南京的天气", Intents.WEATHER, "day" to "today", "kind" to "general", "city" to "南京")
+        local("大后天天气", Intents.WEATHER, "day" to "day_3", "kind" to "general")
+        local("后天的后天天气", Intents.WEATHER, "day" to "day_4", "kind" to "general")
         val prev = RouteDecision(Intents.WEATHER, mapOf("city" to "北京", "day" to "today", "kind" to "general"), Route.LOCAL, 0.98, RouteSource.RULE)
         local("明天的天气呢", Intents.WEATHER, "day" to "tomorrow", "kind" to "general", "city" to "北京", prev = prev)
+        none("下周天气怎么样")
+        none("下周天气")
         local("早安", Intents.CHITCHAT, "kind" to "greeting", "phrase" to "早安")
         local("下午好", Intents.CHITCHAT, "kind" to "greeting", "phrase" to "下午好")
     }

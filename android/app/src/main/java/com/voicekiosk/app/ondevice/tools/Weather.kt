@@ -1,5 +1,10 @@
 package com.voicekiosk.app.ondevice.tools
 
+import com.voicekiosk.app.DayForecastItem
+import com.voicekiosk.app.WeatherInfo
+import com.voicekiosk.app.WeatherManager
+import com.voicekiosk.app.weather.WeatherCacheEntry
+import com.voicekiosk.app.weather.WeatherRepository
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -10,6 +15,37 @@ import kotlin.math.roundToInt
 data class DayForecast(val date: String, val code: Int, val maxC: Double, val minC: Double, val precipProb: Int?)
 
 data class Forecast(val city: String, val currentC: Double?, val currentCode: Int?, val days: List<DayForecast>)
+
+fun Forecast.toWeatherInfo(updatedAtMs: Long = System.currentTimeMillis()): WeatherInfo {
+    val first = days.firstOrNull()
+    val curCode = currentCode ?: first?.code ?: 0
+    val (condZh, icon) = WeatherManager.mapWmoWeatherCode(curCode)
+    val curTemp = currentC?.roundToInt() ?: first?.maxC?.roundToInt() ?: 0
+    val forecastItems = days.map { d ->
+        val (dCond, dIcon) = WeatherManager.mapWmoWeatherCode(d.code)
+        DayForecastItem(
+            date = d.date,
+            weatherCode = d.code,
+            conditionZh = dCond,
+            iconSymbol = dIcon,
+            minTempC = d.minC.roundToInt(),
+            maxTempC = d.maxC.roundToInt(),
+            precipitationProb = d.precipProb
+        )
+    }
+    return WeatherInfo(
+        city = city,
+        temperatureC = curTemp,
+        minTempC = first?.minC?.roundToInt(),
+        maxTempC = first?.maxC?.roundToInt(),
+        weatherCode = curCode,
+        conditionZh = condZh,
+        iconSymbol = icon,
+        updatedAtMs = updatedAtMs,
+        precipitationProb = first?.precipProb,
+        forecastDays = forecastItems
+    )
+}
 
 /** Weather data for the local weather tool; failures make the turn go to the cloud. */
 interface WeatherSource {
@@ -28,19 +64,37 @@ class OpenMeteoWeatherSource(
     private val readTimeoutMs: Int = 3000,
     private val cacheMs: Long = 20 * 60_000L,
     private val clock: () -> Long = System::currentTimeMillis,
-    private val http: (String) -> String = { url -> httpGet(url, connectTimeoutMs, readTimeoutMs) }
+    private val http: (String) -> String = { url -> httpGet(url, connectTimeoutMs, readTimeoutMs) },
+    private val weatherRepo: WeatherRepository? = null
 ) : WeatherSource {
     private val cache = mutableMapOf<String, Pair<Long, Forecast>>()
 
     override fun forecast(city: City): Result<Forecast> = runCatching {
+        val fresh = weatherRepo?.getFreshForecastIfAvailable(city.name, clock())
+        if (fresh != null) {
+            return@runCatching fresh.copy(city = city.name)
+        }
+
         val key = String.format(java.util.Locale.US, "%.3f,%.3f", city.latitude, city.longitude)
         synchronized(cache) { cache[key]?.takeIf { clock() - it.first < cacheMs }?.let { return@runCatching it.second.copy(city = city.name) } }
         val url = String.format(java.util.Locale.US, "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f", city.latitude, city.longitude) +
             "&current=temperature_2m,weather_code" +
             "&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
-            "&timezone=Asia%2FShanghai&forecast_days=3"
+            "&timezone=Asia%2FShanghai&forecast_days=5"
         val f = parseForecast(city.name, http(url)) ?: throw IllegalStateException("bad forecast json")
         synchronized(cache) { cache[key] = clock() to f }
+
+        if (weatherRepo != null) {
+            val nowMs = clock()
+            val entry = WeatherCacheEntry(
+                info = f.toWeatherInfo(nowMs),
+                forecast = f,
+                timestampMs = nowMs,
+                locationKey = String.format(java.util.Locale.US, "%.4f,%.4f", city.latitude, city.longitude)
+            )
+            weatherRepo.setCacheEntry(entry)
+        }
+
         f
     }
 
@@ -106,8 +160,51 @@ class OpenMeteoWeatherSource(
 
 /** Spoken Chinese weather replies from a [Forecast] (templates, no model). */
 object WeatherSpeech {
-    private val DAY_WORD = mapOf("today" to "今天", "tomorrow" to "明天", "after_tomorrow" to "后天")
-    val DAY_INDEX = mapOf("today" to 0, "tomorrow" to 1, "after_tomorrow" to 2)
+    val DAY_WORD = mapOf(
+        "today" to "今天",
+        "tomorrow" to "明天",
+        "after_tomorrow" to "后天",
+        "day_3" to "大后天",
+        "day_4" to "大大后天"
+    )
+    val DAY_INDEX = mapOf(
+        "today" to 0,
+        "tomorrow" to 1,
+        "after_tomorrow" to 2,
+        "day_3" to 3,
+        "day_4" to 4,
+        "day_0" to 0,
+        "day_1" to 1,
+        "day_2" to 2,
+        "今天" to 0,
+        "明天" to 1,
+        "后天" to 2,
+        "大后天" to 3,
+        "后天的后天" to 4,
+        "大大后天" to 4
+    )
+
+    fun canAnswer(f: Forecast, day: String, kind: String = "general"): Boolean {
+        val idx = DAY_INDEX[day] ?: return false
+        f.days.getOrNull(idx) ?: return false
+        return kind in setOf("general", "rain", "temp")
+    }
+
+    private fun weekdayZh(dateStr: String): String? = try {
+        val date = java.time.LocalDate.parse(dateStr)
+        when (date.dayOfWeek) {
+            java.time.DayOfWeek.MONDAY -> "周一"
+            java.time.DayOfWeek.TUESDAY -> "周二"
+            java.time.DayOfWeek.WEDNESDAY -> "周三"
+            java.time.DayOfWeek.THURSDAY -> "周四"
+            java.time.DayOfWeek.FRIDAY -> "周五"
+            java.time.DayOfWeek.SATURDAY -> "周六"
+            java.time.DayOfWeek.SUNDAY -> "周日"
+            else -> null
+        }
+    } catch (_: Exception) {
+        null
+    }
 
     fun condition(code: Int): String = when (code) {
         0 -> "晴"
@@ -148,7 +245,11 @@ object WeatherSpeech {
     fun reply(f: Forecast, day: String, kind: String): String? {
         val idx = DAY_INDEX[day] ?: return null
         val d = f.days.getOrNull(idx) ?: return null
-        val dayWord = DAY_WORD.getValue(day)
+        val dayWord = if (idx >= 3) {
+            weekdayZh(d.date) ?: DAY_WORD[day] ?: "那天"
+        } else {
+            DAY_WORD[day] ?: weekdayZh(d.date) ?: "那天"
+        }
         val cond = condition(d.code)
         val now = if (idx == 0 && f.currentC != null) "现在${deg(f.currentC)}，" else ""
         return when (kind) {

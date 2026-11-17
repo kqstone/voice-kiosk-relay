@@ -19,12 +19,12 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:gravity="center"
+        android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingStart="40dp"
         android:paddingEnd="40dp">
 
-        <!-- Left Column: Centered Date Line, Giant Clock (96sp), Weather Capsule -->
+        <!-- Left Column: Centered Date Line, Giant Clock (96sp), Weather Capsule, Today Weather Details -->
         <LinearLayout
             android:id="@+id/layoutHomeLeft"
             android:layout_width="0dp"
@@ -99,27 +99,50 @@
 
             </LinearLayout>
 
+            <!-- Today Weather Details: collapsed when music session is active -->
+            <include
+                android:id="@+id/layoutWeatherDetails"
+                layout="@layout/widget_weather_details"
+                android:layout_width="320dp"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:visibility="visible" />
+
         </LinearLayout>
 
-        <!-- Countdown Timer Widget: Right Column (Fixed width 360dp, vertically centered) -->
-        <include
-            android:id="@+id/layoutCountdown"
-            layout="@layout/widget_home_countdown"
-            android:layout_width="360dp"
+        <!-- Right Slot: Fixed 380dp container hosting overlapping 5-day forecast & now-playing widget -->
+        <FrameLayout
+            android:id="@+id/layoutRightContainer"
+            android:layout_width="380dp"
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
-            android:layout_marginStart="32dp"
-            android:visibility="gone" />
+            android:layout_marginStart="32dp">
 
-        <!-- Right Column: Now-Playing Widget (Fixed width 360dp, vertically centered) -->
-        <include
-            android:id="@+id/layoutNowPlaying"
-            layout="@layout/widget_home_now_playing"
-            android:layout_width="360dp"
-            android:layout_height="wrap_content"
-            android:layout_gravity="center_vertical"
-            android:layout_marginStart="32dp"
-            android:visibility="gone" />
+            <!-- 5-Day Weather Forecast (visible when no music session) -->
+            <include
+                android:id="@+id/layoutWeatherForecast"
+                layout="@layout/widget_weather_forecast_5day"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:visibility="visible" />
+
+            <!-- Now-Playing Widget: directly inside 380dp right slot (visible when music session active) -->
+            <include
+                android:id="@+id/layoutNowPlaying"
+                layout="@layout/widget_home_now_playing"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:visibility="gone" />
+
+            <!-- Countdown Timer Widget: directly inside 380dp right slot (visible when a countdown is running) -->
+            <include
+                android:id="@+id/layoutCountdown"
+                layout="@layout/widget_home_countdown"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:visibility="gone" />
+
+        </FrameLayout>
 
     </LinearLayout>
 

@@ -107,6 +107,24 @@
             android:layout_marginTop="20dp"
             android:visibility="gone" />
 
+        <!-- Today Weather Details: below weather capsule (visible when no music session) -->
+        <include
+            android:id="@+id/layoutWeatherDetails"
+            layout="@layout/widget_weather_details"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:visibility="visible" />
+
+        <!-- 5-Day Forecast Panel: below today details (visible when no music session) -->
+        <include
+            android:id="@+id/layoutWeatherForecast"
+            layout="@layout/widget_weather_forecast_5day"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:visibility="visible" />
+
     </LinearLayout>
 
     <!-- Bottom Guides Container: Slide Hint + Wake Prompt (positioned above page indicator) -->

@@ -1,13 +1,18 @@
 package com.voicekiosk.app
 
+import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
+import com.voicekiosk.app.tts.TtsManager
+import com.voicekiosk.app.tts.TtsStatus
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
@@ -27,6 +32,9 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.app.ActivityCompat
+import com.voicekiosk.app.location.LocationHelper
+import com.voicekiosk.app.ondevice.tools.CityTable
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -50,6 +58,7 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
 
     companion object {
         private const val TAG = "SettingsActivity"
+        private const val PERMISSION_REQUEST_LOCATION = 301
         private const val MIN_THRESHOLD = 0.10f
         private const val THRESHOLD_STEP = 0.05f
         private const val MAX_STEPS = 8 // 0.10 to 0.50 -> 8 steps of 0.05
@@ -66,12 +75,18 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
     private lateinit var thresholdValueText: TextView
 
     // Weather & Location
+    private lateinit var autoLocationCheckBox: CheckBox
     private var selectedWeatherCity: String = ""
     private var selectedWeatherLat: Float = AppConfig.DEFAULT_WEATHER_LATITUDE
     private var selectedWeatherLon: Float = AppConfig.DEFAULT_WEATHER_LONGITUDE
     private lateinit var weatherStatusText: TextView
     private lateinit var weatherCityEditText: EditText
     private val weatherPresetChips = mutableListOf<Pair<TextView, CityLocation>>()
+
+    // Voice Broadcast (TTS)
+    private var selectedTtsEngine: String = ""
+    private lateinit var ttsStatusText: TextView
+    private lateinit var ttsEngineButton: Button
 
     // OLED Standby & Night Mode
     private lateinit var onDeviceRoutingCheckBox: CheckBox
@@ -81,6 +96,7 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
     private lateinit var onDeviceSpeculativeCheckBox: CheckBox
     private lateinit var memoryExtractionCheckBox: CheckBox
     private lateinit var onDeviceWeatherCheckBox: CheckBox
+    private lateinit var experimentalAecNsCheckBox: CheckBox
     private var onDevicePlayerPackage: String = ""
     @Volatile private var modelDownloader: com.voicekiosk.app.ondevice.OnDeviceModelDownloader? = null
     private lateinit var nightModeCheckBox: CheckBox
@@ -122,6 +138,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         isActivityVisible = true
         AndroidReleaseUpdatePlatform.getManager(this).registerListener(this)
         refreshPlayerSettingsAction?.invoke()
+        if (::ttsStatusText.isInitialized) {
+            refreshTtsUi()
+        }
     }
 
     override fun onStop() {
@@ -154,6 +173,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         // Initialize night mode schedule state
         selectedNightStartHour = AppConfig.getNightModeStartHour(this)
         selectedNightEndHour = AppConfig.getNightModeEndHour(this)
+
+        // Initialize preferred TTS engine state
+        selectedTtsEngine = AppConfig.getPreferredTtsEngine(this)
 
         val rootScrollView = ScrollView(this).apply {
             setBackgroundColor(Color.parseColor("#121212"))
@@ -481,6 +503,29 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         }
         weatherCard.addView(weatherTitle)
 
+        autoLocationCheckBox = CheckBox(this).apply {
+            text = "启用自动粗略定位（按粗定位就近匹配城市，关闭时使用下方手动城市）"
+            setTextColor(Color.parseColor("#E5E7EB"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            isChecked = AppConfig.isAutoLocationEnabled(this@SettingsActivity)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(8)
+            }
+            layoutParams = lp
+            setOnCheckedChangeListener { _, isChecked ->
+                if (isChecked) {
+                    handleAutoLocationToggleEnabled()
+                } else {
+                    weatherStatusText.text = "已切换为手动城市：$selectedWeatherCity · 保存后生效"
+                    weatherStatusText.setTextColor(Color.parseColor("#9CA3AF"))
+                }
+            }
+        }
+        weatherCard.addView(autoLocationCheckBox)
+
         val cachedWeather = AppConfig.getCachedWeatherSummary(this)
         weatherStatusText = TextView(this).apply {
             val coordStr = String.format(Locale.US, "%.2f, %.2f", selectedWeatherLat, selectedWeatherLon)
@@ -530,6 +575,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
                 isClickable = true
                 isFocusable = true
                 setOnClickListener {
+                    if (::autoLocationCheckBox.isInitialized && autoLocationCheckBox.isChecked) {
+                        autoLocationCheckBox.isChecked = false
+                    }
                     selectedWeatherCity = city.name
                     selectedWeatherLat = city.latitude
                     selectedWeatherLon = city.longitude
@@ -636,6 +684,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
                     alpha = 1.0f
 
                     result.onSuccess { loc ->
+                        if (::autoLocationCheckBox.isInitialized && autoLocationCheckBox.isChecked) {
+                            autoLocationCheckBox.isChecked = false
+                        }
                         selectedWeatherCity = loc.name
                         selectedWeatherLat = loc.latitude
                         selectedWeatherLon = loc.longitude
@@ -665,6 +716,9 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         weatherCard.addView(weatherHint)
 
         container.addView(weatherCard)
+
+        // Section: Voice Broadcast (TTS) Settings Card
+        buildTtsCard(container)
 
         // Section 4: OLED AOD Standby & Night Mode Settings Card
         val oledCard = createCardLayout().apply {
@@ -1441,6 +1495,71 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         }
     }
 
+    private fun handleAutoLocationToggleEnabled() {
+        if (!LocationHelper.hasLocationPermission(this)) {
+            weatherStatusText.text = "正在请求定位权限..."
+            weatherStatusText.setTextColor(Color.parseColor("#FBBF24"))
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION),
+                PERMISSION_REQUEST_LOCATION
+            )
+            return
+        }
+        triggerCoarseLocationInSettings()
+    }
+
+    private fun triggerCoarseLocationInSettings() {
+        weatherStatusText.text = "正在通过网络获取粗略定位..."
+        weatherStatusText.setTextColor(Color.parseColor("#60A5FA"))
+        LocationHelper.requestCoarseLocation(this) { location ->
+            if (!isUiSafeForInteraction()) return@requestCoarseLocation
+            if (location != null) {
+                val nearest = CityTable.findNearest(location.latitude, location.longitude)
+                if (nearest != null) {
+                    selectedWeatherCity = nearest.name
+                    selectedWeatherLat = location.latitude.toFloat()
+                    selectedWeatherLon = location.longitude.toFloat()
+                    weatherCityEditText.setText(nearest.name)
+                    weatherCityEditText.setSelection(nearest.name.length)
+                    updateWeatherPresetChipHighlights(nearest.name)
+                    val coordStr = String.format(Locale.US, "%.2f, %.2f", selectedWeatherLat, selectedWeatherLon)
+                    weatherStatusText.text = "自动定位就近匹配：${nearest.name} ($coordStr) · 保存后生效"
+                    weatherStatusText.setTextColor(Color.parseColor("#10B981"))
+                    return@requestCoarseLocation
+                }
+            }
+            weatherStatusText.text = "自动定位超时或失败，已回退手动城市：$selectedWeatherCity"
+            weatherStatusText.setTextColor(Color.parseColor("#F59E0B"))
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == PERMISSION_REQUEST_LOCATION) {
+            val locIdx = permissions.indexOf(Manifest.permission.ACCESS_COARSE_LOCATION)
+            val granted = if (locIdx >= 0 && locIdx < grantResults.size) {
+                grantResults[locIdx] == PackageManager.PERMISSION_GRANTED
+            } else {
+                grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+            }
+            if (granted) {
+                triggerCoarseLocationInSettings()
+            } else {
+                AppConfig.setLocationPermissionRequested(this, true)
+                if (::autoLocationCheckBox.isInitialized) {
+                    autoLocationCheckBox.isChecked = false
+                }
+                weatherStatusText.text = "定位权限被拒，已切换为手动城市：$selectedWeatherCity"
+                weatherStatusText.setTextColor(Color.parseColor("#F87171"))
+            }
+        }
+    }
+
     private fun handleSave() {
         val rawWord = wakeWordEditText.text.toString().trim().replace("\\s+".toRegex(), "")
 
@@ -1535,13 +1654,20 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
         AppConfig.setOnDeviceSpeculativeCloudEnabled(this, onDeviceSpeculativeCheckBox.isChecked)
         AppConfig.setMemoryExtractionEnabled(this, memoryExtractionCheckBox.isChecked)
         AppConfig.setOnDeviceWeatherEnabled(this, onDeviceWeatherCheckBox.isChecked)
+        if (::experimentalAecNsCheckBox.isInitialized) {
+            AppConfig.setExperimentalAecNsEnabled(this, experimentalAecNsCheckBox.isChecked)
+        }
         AppConfig.setOnDevicePlayerPackage(this, onDevicePlayerPackage)
+        AppConfig.setPreferredTtsEngine(this, selectedTtsEngine)
         AppConfig.setNightModeEnabled(this, nightModeCheckBox.isChecked)
         AppConfig.setNightModeStartHour(this, selectedNightStartHour)
         AppConfig.setNightModeEndHour(this, selectedNightEndHour)
         AppConfig.setNightModeDimAlpha(this, chosenNightDim)
 
         // Weather Location settings
+        if (::autoLocationCheckBox.isInitialized) {
+            AppConfig.setAutoLocationEnabled(this, autoLocationCheckBox.isChecked)
+        }
         val typedCity = weatherCityEditText.text.toString().trim()
         if (typedCity.isNotEmpty() && typedCity != selectedWeatherCity) {
             val preset = WeatherManager.findPresetCity(typedCity)
@@ -2072,6 +2198,15 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
             startActivity(Intent(this, com.voicekiosk.app.ondevice.LlmBenchmarkActivity::class.java))
         }
 
+        // ---- 录音与硬件回声消除（实验） ----
+        section("录音与硬件回声消除（实验）")
+        experimentalAecNsCheckBox = check(
+            "启用 VOICE_RECOGNITION 录音源与硬件 AEC/NS（实验性）",
+            AppConfig.isExperimentalAecNsEnabled(this)
+        )
+        note("开启后录音源切换为 VOICE_RECOGNITION 并尝试开启系统硬件回声消除与降噪；在部分机型上可能影响唤醒灵敏度与拾音音量，默认关闭。主方案依赖对话时自动暂停后台音乐。")
+        note("已知限制：完全不理会焦点且没有 MediaSession 的播放器可能停不下来；没有通知使用权时主动暂停只能靠媒体按键，建议开启通知使用权。")
+
         // options that only act through the fast path
         val dependents = listOf(onDeviceWeatherCheckBox, onDeviceChitchatCheckBox, playerButton, onDeviceModelCheckBox, onDeviceSpeculativeCheckBox, memoryExtractionCheckBox)
         fun syncEnabled() {
@@ -2112,5 +2247,263 @@ class SettingsActivity : Activity(), ReleaseUpdateChecker.Listener {
             "读取失败：${e.javaClass.simpleName}"
         }
         AlertDialog.Builder(this).setTitle("长期记忆").setMessage(text).setPositiveButton("关闭", null).show()
+    }
+
+    /**
+     * Voice Broadcast (TTS) settings card:
+     * - Status & engine display
+     * - Engine dropdown chooser
+     * - Test listen button
+     * - Open system TTS settings
+     * - Install TTS voice data
+     */
+    private fun buildTtsCard(container: LinearLayout) {
+        val ttsCard = createCardLayout().apply {
+            val lp = layoutParams as? LinearLayout.LayoutParams
+                ?: LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            lp.topMargin = dpToPx(16)
+            layoutParams = lp
+        }
+
+        val ttsTitle = TextView(this).apply {
+            text = "语音播报"
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            typeface = Typeface.DEFAULT_BOLD
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(6)
+            }
+            layoutParams = lp
+        }
+        ttsCard.addView(ttsTitle)
+
+        val ttsSubtitle = TextView(this).apply {
+            text = "设置语音回答与报时所用的本机语音引擎，支持切换引擎、试听及安装中文数据包"
+            setTextColor(Color.parseColor("#9CA3AF"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(10)
+            }
+            layoutParams = lp
+        }
+        ttsCard.addView(ttsSubtitle)
+
+        ttsStatusText = TextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(10)
+            }
+            layoutParams = lp
+        }
+        ttsCard.addView(ttsStatusText)
+
+        ttsEngineButton = Button(this).apply {
+            isAllCaps = false
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(10)
+            }
+            layoutParams = lp
+            setOnClickListener {
+                showTtsEngineChooserDialog()
+            }
+        }
+        ttsCard.addView(ttsEngineButton)
+
+        val actionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(4)
+            }
+            layoutParams = lp
+        }
+
+        val testSpeakButton = Button(this).apply {
+            text = "试听"
+            isAllCaps = false
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                marginEnd = dpToPx(6)
+            }
+            layoutParams = lp
+            setOnClickListener {
+                handleTtsTestSpeak()
+            }
+        }
+        actionRow.addView(testSpeakButton)
+
+        val systemTtsButton = Button(this).apply {
+            text = "打开系统 TTS 设置"
+            isAllCaps = false
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.4f).apply {
+                marginEnd = dpToPx(6)
+            }
+            layoutParams = lp
+            setOnClickListener {
+                openSystemTtsSettings()
+            }
+        }
+        actionRow.addView(systemTtsButton)
+
+        val installDataButton = Button(this).apply {
+            text = "安装语音数据"
+            isAllCaps = false
+            val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.4f)
+            layoutParams = lp
+            setOnClickListener {
+                openInstallTtsData()
+            }
+        }
+        actionRow.addView(installDataButton)
+
+        ttsCard.addView(actionRow)
+
+        val ttsNote = TextView(this).apply {
+            text = "提示：若提示缺少中文数据，可点击「安装语音数据」下载或在「系统 TTS 设置」中安装中文语言包。"
+            setTextColor(Color.parseColor("#9CA3AF"))
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dpToPx(8)
+            }
+            layoutParams = lp
+        }
+        ttsCard.addView(ttsNote)
+
+        container.addView(ttsCard)
+        refreshTtsUi()
+    }
+
+    private fun refreshTtsUi() {
+        val ttsMgr = TtsManager.getInstance(this)
+        val available = ttsMgr.queryAvailableEngines(this)
+        val currentStatus = ttsMgr.selector.status
+        val activeEngine = ttsMgr.selector.selectedEngine
+
+        val statusDesc = when (currentStatus) {
+            TtsStatus.READY -> "就绪 (READY)"
+            TtsStatus.NO_ENGINE -> "未安装可用 TTS 引擎 (NO_ENGINE)"
+            TtsStatus.INIT_FAILED -> "引擎初始化失败 (INIT_FAILED)"
+            TtsStatus.LANG_MISSING -> "缺少中文语音数据 (LANG_MISSING)"
+        }
+        val statusColor = when (currentStatus) {
+            TtsStatus.READY -> Color.parseColor("#10B981")
+            TtsStatus.LANG_MISSING -> Color.parseColor("#F59E0B")
+            TtsStatus.NO_ENGINE, TtsStatus.INIT_FAILED -> Color.parseColor("#EF4444")
+        }
+
+        val activeLabel = if (!activeEngine.isNullOrEmpty()) {
+            val found = available.firstOrNull { it.packageName == activeEngine }
+            found?.let { "${it.label} (${it.packageName})" } ?: activeEngine
+        } else {
+            "无"
+        }
+
+        ttsStatusText.text = "当前状态：$statusDesc\n运行引擎：$activeLabel"
+        ttsStatusText.setTextColor(statusColor)
+
+        val chosenLabel = if (selectedTtsEngine.isEmpty()) {
+            "自动选择系统默认（推荐）"
+        } else {
+            val found = available.firstOrNull { it.packageName == selectedTtsEngine }
+            found?.let { "${it.label} (${it.packageName})" } ?: selectedTtsEngine
+        }
+        ttsEngineButton.text = "当前选择：$chosenLabel"
+    }
+
+    private fun showTtsEngineChooserDialog() {
+        val ttsMgr = TtsManager.getInstance(this)
+        val available = ttsMgr.queryAvailableEngines(this)
+        val labels = mutableListOf<String>()
+        val pkgs = mutableListOf<String>()
+
+        labels.add("自动选择系统默认（推荐）")
+        pkgs.add("")
+
+        for (eng in available) {
+            labels.add("${eng.label} (${eng.packageName})")
+            pkgs.add(eng.packageName)
+        }
+
+        val currentSelected = selectedTtsEngine
+        if (currentSelected.isNotEmpty() && !pkgs.contains(currentSelected)) {
+            labels.add("$currentSelected (未检测到)")
+            pkgs.add(currentSelected)
+        }
+
+        var selectedIndex = pkgs.indexOf(currentSelected).coerceAtLeast(0)
+
+        AlertDialog.Builder(this)
+            .setTitle("选择 TTS 语音引擎")
+            .setSingleChoiceItems(labels.toTypedArray(), selectedIndex) { _, which ->
+                selectedIndex = which
+            }
+            .setPositiveButton("确定") { dialog, _ ->
+                if (selectedIndex in pkgs.indices) {
+                    selectedTtsEngine = pkgs[selectedIndex]
+                    refreshTtsUi()
+                }
+                dialog.dismiss()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun handleTtsTestSpeak() {
+        val ttsMgr = TtsManager.getInstance(this)
+        val spoken = ttsMgr.speakNonBlocking("你好，这是语音播报测试。")
+        if (!spoken) {
+            Toast.makeText(this, "语音播报当前不可用 (${ttsMgr.selector.status})", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun openSystemTtsSettings() {
+        try {
+            val intent = Intent("com.android.settings.TTS_SETTINGS").apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            try {
+                val fallback = Intent(android.provider.Settings.ACTION_SETTINGS).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(fallback)
+            } catch (_: Exception) {
+                Toast.makeText(this, "无法打开系统设置", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun openInstallTtsData() {
+        try {
+            val intent = Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                if (selectedTtsEngine.isNotEmpty()) {
+                    setPackage(selectedTtsEngine)
+                }
+            }
+            startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(this, "未找到语音数据安装程序", Toast.LENGTH_SHORT).show()
+        }
     }
 }

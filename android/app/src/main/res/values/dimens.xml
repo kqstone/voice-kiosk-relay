@@ -27,4 +27,10 @@
     <!-- Task Card Margins (Portrait) -->
     <dimen name="task_card_margin_h">16dp</dimen>
     <dimen name="task_card_margin_v">6dp</dimen>
+
+    <!-- Music Card Tokens (Portrait) -->
+    <dimen name="music_cover_size">64dp</dimen>
+    <dimen name="music_cover_corner_radius">10dp</dimen>
+    <dimen name="music_btn_size">44dp</dimen>
+    <dimen name="music_btn_icon_size">24dp</dimen>
 </resources>

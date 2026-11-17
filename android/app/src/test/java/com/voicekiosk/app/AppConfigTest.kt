@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.Context
 import android.content.SharedPreferences
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -68,6 +69,24 @@ class AppConfigTest {
     }
 
     @Test
+    fun testPreferredTtsEnginePersistenceAndDefault() {
+        val prefs = FakeSharedPreferences()
+        assertEquals("", AppConfig.getPreferredTtsEngine(prefs))
+
+        AppConfig.setPreferredTtsEngine(prefs, "com.google.android.tts")
+        assertEquals("com.google.android.tts", AppConfig.getPreferredTtsEngine(prefs))
+
+        AppConfig.setPreferredTtsEngine(prefs, "  com.iflytek.speechcloud  ")
+        assertEquals("com.iflytek.speechcloud", AppConfig.getPreferredTtsEngine(prefs))
+
+        AppConfig.setPreferredTtsEngine(prefs, "")
+        assertEquals("", AppConfig.getPreferredTtsEngine(prefs))
+
+        AppConfig.setPreferredTtsEngine(prefs, null)
+        assertEquals("", AppConfig.getPreferredTtsEngine(prefs))
+    }
+
+    @Test
     fun testContextPrefsOverride() {
         val prefs = FakeSharedPreferences()
         try {
@@ -87,6 +106,42 @@ class AppConfigTest {
         } finally {
             AppConfig.prefsOverride = null
         }
+    }
+
+    @Test
+    fun testAutoLocationEnabled_defaultAndPersistence() {
+        val prefs = FakeSharedPreferences()
+        assertTrue(AppConfig.isAutoLocationEnabled(prefs))
+
+        AppConfig.setAutoLocationEnabled(prefs, false)
+        assertFalse(AppConfig.isAutoLocationEnabled(prefs))
+
+        AppConfig.setAutoLocationEnabled(prefs, true)
+        assertTrue(AppConfig.isAutoLocationEnabled(prefs))
+    }
+
+    @Test
+    fun testLocationPermissionRequested_defaultAndPersistence() {
+        val prefs = FakeSharedPreferences()
+        assertFalse(AppConfig.isLocationPermissionRequested(prefs))
+
+        AppConfig.setLocationPermissionRequested(prefs, true)
+        assertTrue(AppConfig.isLocationPermissionRequested(prefs))
+
+        AppConfig.setLocationPermissionRequested(prefs, false)
+        assertFalse(AppConfig.isLocationPermissionRequested(prefs))
+    }
+
+    @Test
+    fun testExperimentalAecNsEnabled_defaultAndPersistence() {
+        val prefs = FakeSharedPreferences()
+        assertFalse("Default must be false", AppConfig.isExperimentalAecNsEnabled(prefs))
+
+        AppConfig.setExperimentalAecNsEnabled(prefs, true)
+        assertTrue(AppConfig.isExperimentalAecNsEnabled(prefs))
+
+        AppConfig.setExperimentalAecNsEnabled(prefs, false)
+        assertFalse(AppConfig.isExperimentalAecNsEnabled(prefs))
     }
 
     @Test

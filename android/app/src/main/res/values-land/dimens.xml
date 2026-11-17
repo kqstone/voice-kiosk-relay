@@ -14,4 +14,7 @@
     <!-- Task Card Margins (Landscape Grid) -->
     <dimen name="task_card_margin_h">6dp</dimen>
     <dimen name="task_card_margin_v">6dp</dimen>
+
+    <!-- Music Card Tokens (Landscape) -->
+    <dimen name="music_cover_size">80dp</dimen>
 </resources>

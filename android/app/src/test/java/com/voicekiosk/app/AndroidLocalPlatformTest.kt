@@ -191,6 +191,10 @@ class AndroidLocalPlatformTest {
             "AndroidManifest queries must declare MediaBrowserServiceCompat",
             content.contains("androidx.media.MediaBrowserServiceCompat")
         )
+        assertTrue(
+            "AndroidManifest queries must declare TTS_SERVICE",
+            content.contains("android.intent.action.TTS_SERVICE")
+        )
     }
 
     private class SimulatedMusicPlayerScanner(

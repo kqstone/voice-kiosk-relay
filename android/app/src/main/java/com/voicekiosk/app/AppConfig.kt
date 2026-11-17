@@ -86,12 +86,26 @@ object AppConfig {
     private const val KEY_ONDEVICE_WEATHER_ENABLED = "pref_ondevice_weather_enabled"
     const val KEY_ONDEVICE_PLAYER_PACKAGE = "pref_ondevice_player_package"
     const val DEFAULT_ONDEVICE_PLAYER_PACKAGE = ""
+    const val KEY_PREFERRED_TTS_ENGINE = "pref_tts_engine"
+    const val DEFAULT_PREFERRED_TTS_ENGINE = ""
     private const val KEY_WEATHER_CITY = "pref_weather_city"
     private const val KEY_WEATHER_LATITUDE = "pref_weather_latitude"
     private const val KEY_WEATHER_LONGITUDE = "pref_weather_longitude"
+    const val KEY_AUTO_LOCATION_ENABLED = "pref_auto_location_enabled"
+    const val DEFAULT_AUTO_LOCATION_ENABLED = true
+    const val KEY_LOCATION_PERMISSION_REQUESTED = "pref_location_permission_requested"
     private const val KEY_CACHED_WEATHER_SUMMARY = "pref_cached_weather_summary"
+    const val KEY_CACHED_WEATHER_JSON = "pref_cached_weather_json"
     private const val KEY_LAST_WEATHER_FETCH_MS = "pref_last_weather_fetch_ms"
-    private const val KEY_STARTUP_UPDATE_CHECK_ENABLED = "pref_startup_update_check_enabled"
+    const val WEATHER_CACHE_TTL_MS = 30 * 60 * 1000L
+    const val KEY_EXPERIMENTAL_AEC_NS_ENABLED = "pref_experimental_aec_ns_enabled"
+    const val DEFAULT_EXPERIMENTAL_AEC_NS_ENABLED = false
+
+    const val AUDIO_DRAIN_DEFAULT_MS = 180L
+    const val AUDIO_DRAIN_MUSIC_FADEOUT_MAX_MS = 500L
+    const val AUDIO_PROACTIVE_PAUSE_DELAY_MS = 300L
+
+    const val KEY_STARTUP_UPDATE_CHECK_ENABLED = "pref_startup_update_check_enabled"
     private const val KEY_LAST_STARTUP_UPDATE_CHECK_MS = "pref_last_startup_update_check_ms"
 
     const val DEFAULT_STARTUP_UPDATE_CHECK_ENABLED = false
@@ -304,6 +318,24 @@ object AppConfig {
     }
 
     /**
+     * Experimental: changes AudioRecord audio source to VOICE_RECOGNITION and attempts hardware AEC/NS.
+     * Default false (uses MediaRecorder.AudioSource.MIC).
+     */
+    fun isExperimentalAecNsEnabled(context: Context): Boolean =
+        isExperimentalAecNsEnabled(prefs(context))
+
+    fun isExperimentalAecNsEnabled(prefs: SharedPreferences): Boolean =
+        prefs.getBoolean(KEY_EXPERIMENTAL_AEC_NS_ENABLED, DEFAULT_EXPERIMENTAL_AEC_NS_ENABLED)
+
+    fun setExperimentalAecNsEnabled(context: Context, enabled: Boolean) {
+        setExperimentalAecNsEnabled(prefs(context), enabled)
+    }
+
+    fun setExperimentalAecNsEnabled(prefs: SharedPreferences, enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_EXPERIMENTAL_AEC_NS_ENABLED, enabled).apply()
+    }
+
+    /**
      * Normalizes a player package name: null or blank becomes "", and non-empty package names
      * are trimmed and returned as-is. An empty string signifies automatic selection.
      */
@@ -325,6 +357,20 @@ object AppConfig {
         prefs.edit().putString(KEY_ONDEVICE_PLAYER_PACKAGE, normalizePlayerPackage(pkg)).apply()
     }
 
+    fun getPreferredTtsEngine(context: Context): String =
+        getPreferredTtsEngine(prefs(context))
+
+    fun getPreferredTtsEngine(prefs: SharedPreferences): String =
+        prefs.getString(KEY_PREFERRED_TTS_ENGINE, DEFAULT_PREFERRED_TTS_ENGINE)?.trim().orEmpty()
+
+    fun setPreferredTtsEngine(context: Context, enginePackage: String?) {
+        setPreferredTtsEngine(prefs(context), enginePackage)
+    }
+
+    fun setPreferredTtsEngine(prefs: SharedPreferences, enginePackage: String?) {
+        prefs.edit().putString(KEY_PREFERRED_TTS_ENGINE, enginePackage?.trim().orEmpty()).apply()
+    }
+
     fun getWeatherCity(context: Context): String =
         prefs(context).getString(KEY_WEATHER_CITY, DEFAULT_WEATHER_CITY) ?: DEFAULT_WEATHER_CITY
 
@@ -342,11 +388,55 @@ object AppConfig {
             .apply()
     }
 
+    fun isAutoLocationEnabled(context: Context): Boolean =
+        isAutoLocationEnabled(prefs(context))
+
+    fun isAutoLocationEnabled(prefs: SharedPreferences): Boolean =
+        prefs.getBoolean(KEY_AUTO_LOCATION_ENABLED, DEFAULT_AUTO_LOCATION_ENABLED)
+
+    fun setAutoLocationEnabled(context: Context, enabled: Boolean) {
+        setAutoLocationEnabled(prefs(context), enabled)
+    }
+
+    fun setAutoLocationEnabled(prefs: SharedPreferences, enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_LOCATION_ENABLED, enabled).apply()
+    }
+
+    fun isLocationPermissionRequested(context: Context): Boolean =
+        isLocationPermissionRequested(prefs(context))
+
+    fun isLocationPermissionRequested(prefs: SharedPreferences): Boolean =
+        prefs.getBoolean(KEY_LOCATION_PERMISSION_REQUESTED, false)
+
+    fun setLocationPermissionRequested(context: Context, requested: Boolean) {
+        setLocationPermissionRequested(prefs(context), requested)
+    }
+
+    fun setLocationPermissionRequested(prefs: SharedPreferences, requested: Boolean) {
+        prefs.edit().putBoolean(KEY_LOCATION_PERMISSION_REQUESTED, requested).apply()
+    }
+
     fun getCachedWeatherSummary(context: Context): String =
         prefs(context).getString(KEY_CACHED_WEATHER_SUMMARY, "") ?: ""
 
     fun setCachedWeatherSummary(context: Context, summary: String) {
         prefs(context).edit().putString(KEY_CACHED_WEATHER_SUMMARY, summary).apply()
+    }
+
+    fun getCachedWeatherJson(context: Context): String =
+        prefs(context).getString(KEY_CACHED_WEATHER_JSON, "") ?: ""
+
+    fun setCachedWeatherJson(context: Context, json: String) {
+        prefs(context).edit().putString(KEY_CACHED_WEATHER_JSON, json).apply()
+    }
+
+    fun isWeatherCacheValid(lastFetchMs: Long, nowMs: Long = System.currentTimeMillis()): Boolean =
+        lastFetchMs > 0L && (nowMs - lastFetchMs) in 0 until WEATHER_CACHE_TTL_MS
+
+    fun isWeatherCacheValid(context: Context, nowMs: Long = System.currentTimeMillis()): Boolean {
+        val lastFetch = getLastWeatherFetchMs(context)
+        val json = getCachedWeatherJson(context)
+        return json.isNotEmpty() && isWeatherCacheValid(lastFetch, nowMs)
     }
 
     fun getLastWeatherFetchMs(context: Context): Long =

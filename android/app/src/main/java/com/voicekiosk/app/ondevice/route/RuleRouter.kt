@@ -11,7 +11,10 @@ package com.voicekiosk.app.ondevice.route
  * orchestrator skip the model: weather (stub until S3) and memory commands (the bridge
  * owns long-term memory).
  */
-class RuleRouter {
+class RuleRouter(
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val zone: () -> java.time.ZoneId = java.time.ZoneId::systemDefault
+) {
 
     /** Previous turn as far as L0 cares (ellipsis like "继续" / "再大点"). */
     fun route(text: String, previous: RouteDecision? = null): RouteDecision? {
@@ -216,7 +219,24 @@ class RuleRouter {
         "今天", "今日", "今儿", "今儿个", "现在", "这会儿" -> "today"
         "明天", "明日", "明儿", "明儿个" -> "tomorrow"
         "后天", "后儿" -> "after_tomorrow"
-        else -> null
+        "大后天" -> "day_3"
+        "后天的后天", "大大后天" -> "day_4"
+        else -> {
+            val targetDow = parseWeekday(d)
+            if (targetDow != null) {
+                val now = java.time.ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(clock()), zone())
+                val currentDow = now.dayOfWeek.value
+                val offset = (targetDow - currentDow + 7) % 7
+                when (offset) {
+                    0 -> "today"
+                    1 -> "tomorrow"
+                    2 -> "after_tomorrow"
+                    3 -> "day_3"
+                    4 -> "day_4"
+                    else -> null
+                }
+            } else null
+        }
     }
 
     private fun kindOf(what: String): String = when {
@@ -380,8 +400,24 @@ class RuleRouter {
         )
 
         private const val CITY_RE = "(?<city>(?:" + "@CITIES@" + ")市?|[\u4e00-\u9fa5]{1,5}(?:市|县|区))"
-        private const val DAY1 = "(?<d1>今天|今日|今儿个|今儿|明天|明日|明儿个|明儿|后天|现在|这会儿)"
-        private const val DAY2 = "(?<d2>今天|今日|今儿个|今儿|明天|明日|明儿个|明儿|后天|现在|这会儿)"
+        private const val DAY_PATTERN = "今天|今日|今儿个|今儿|明天|明日|明儿个|明儿|大后天|大大后天|后天的后天|后天|后儿|现在|这会儿|(?:这周|本周)?(?:星期|礼拜|周)[一二三四五六日天]"
+        private const val DAY1 = "(?<d1>$DAY_PATTERN)"
+        private const val DAY2 = "(?<d2>$DAY_PATTERN)"
+
+        fun parseWeekday(raw: String?): Int? {
+            if (raw.isNullOrBlank()) return null
+            val s = raw.trim().removePrefix("这周").removePrefix("本周")
+            return when (s) {
+                "周一", "星期一", "礼拜一" -> 1
+                "周二", "星期二", "礼拜二" -> 2
+                "周三", "星期三", "礼拜三" -> 3
+                "周四", "星期四", "礼拜四" -> 4
+                "周五", "星期五", "礼拜五" -> 5
+                "周六", "星期六", "礼拜六" -> 6
+                "周日", "周天", "星期日", "星期天", "礼拜日", "礼拜天" -> 7
+                else -> null
+            }
+        }
         private val WHAT = "(?<what>天气|天气怎么样|天气如何|天气咋样|天气好|天气好不好|天气预报|天气情况|气温|气温多少|温度|温度多少|多少度|几度|热不热|冷不冷|会下雨|下雨|会不会下雨|下不下雨|有雨|有没有雨|要带伞|需要带伞|要不要带伞|用带伞|用不用带伞|得带伞|会下雪|下雪|会不会下雪|冷吗|热吗|很冷|很热|很冷吗|很热吗|会很冷吗|会很热吗|凉快吗|暖和吗|下雨吗|下雪吗|有雨吗)"
         private val WEATHER_Q = Regex(
             "(?:那)?(?:看看|看一下|查查|查一下|查询|说说|报一下|播报一下|播报)?(?:$DAY1)?(?:${CITY_RE.replace("@CITIES@", com.voicekiosk.app.ondevice.tools.CityTable.NAME_PATTERN)})?(?:$DAY2)?(?:的)?(?:外面|外边|室外|出门)?(?:会不会)?$WHAT(?:不|没|没有|呢)?"
