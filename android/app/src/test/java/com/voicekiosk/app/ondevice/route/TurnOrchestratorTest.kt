@@ -210,8 +210,7 @@ class TurnOrchestratorTest {
         val o = TurnOrchestrator(
             TurnOrchestrator.Config(chitchatEnabled = false),
             RuleRouter(), null, LocalToolExecutor(platform, weather, alarmStore = store) { com.voicekiosk.app.ondevice.tools.City("上海", 31.2, 121.5) }, ctx,
-            cloud = { req -> cloudRequests += req; Result.success(CloudReply(cloudReplyText)) },
-            clock = { clockTime }, log = { logs += it }, smallTalkReplies = fakeReplies
+            cloud = { req -> cloudRequests += req; cloudCalls += req.text; cloudResult(req.text).map { com.voicekiosk.app.conversation.CloudReply(it, ackedIds) } }
         )
         val r = o.handle("设个明天早上七点的闹钟")
         assertEquals(TurnSource.LOCAL_RULE, r.source)
