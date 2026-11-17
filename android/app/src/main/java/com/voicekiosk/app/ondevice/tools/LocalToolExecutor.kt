@@ -340,6 +340,8 @@ class LocalToolExecutor(
             val scheduled = (alarmScheduler ?: { ctx, itm -> AlarmScheduler.scheduleAlarm(ctx, itm) })(context, item)
             if (!scheduled) {
                 Log.w(TAG, "AlarmScheduler failed to schedule alarm ${item.id}")
+                store?.updateStatus(item.id, AlarmItem.STATUS_CANCELLED)
+                return ToolResult.ok("闹钟没定上，请先在设置里打开精确闹钟权限，再说一次就行。")
             }
         }
 
