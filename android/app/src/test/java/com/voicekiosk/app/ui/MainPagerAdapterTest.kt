@@ -13,11 +13,12 @@ import org.junit.Test
 /**
  * Unit test for MainPagerAdapter verifying stable pager indexing and page counts.
  *
- * Requirements (Phase 4):
+ * Requirements (Phase 5):
  * - Page 0 is always the Home screen.
- * - Pages 1..N are always board pages.
+ * - Page 1 is always the Schedule Board page.
+ * - Pages 2..N+1 are dynamic board pages.
  * - Board positions must never shift when playback starts, updates, or stops.
- * - Page count must always equal 1 + boards.size, completely invariant to playback state.
+ * - Page count must always equal 2 + boards.size, completely invariant to playback state.
  */
 class MainPagerAdapterTest {
 
@@ -30,28 +31,28 @@ class MainPagerAdapterTest {
     }
 
     @Test
-    fun testItemCount_alwaysEqualsOnePlusBoardCount() {
-        // Zero boards: only Home screen (count = 1)
+    fun testItemCount_alwaysEqualsTwoPlusBoardCount() {
+        // Zero boards: Home screen + Schedule Board (count = 2)
         val adapterZero = MainPagerAdapter(emptyList())
-        assertEquals(1, adapterZero.itemCount)
+        assertEquals(2, adapterZero.itemCount)
 
-        // 3 boards: Home screen + 3 boards (count = 4)
+        // 3 boards: Home screen + Schedule Board + 3 boards (count = 5)
         val boards3 = listOf(
             createFakeBoard("b1", "Board 1"),
             createFakeBoard("b2", "Board 2"),
             createFakeBoard("b3", "Board 3")
         )
         val adapter3 = MainPagerAdapter(boards3)
-        assertEquals(4, adapter3.itemCount)
+        assertEquals(5, adapter3.itemCount)
 
-        // 5 boards: Home screen + 5 boards (count = 6)
+        // 5 boards: Home screen + Schedule Board + 5 boards (count = 7)
         val boards5 = (1..5).map { createFakeBoard("b$it", "Board $it") }
         val adapter5 = MainPagerAdapter(boards5)
-        assertEquals(6, adapter5.itemCount)
+        assertEquals(7, adapter5.itemCount)
     }
 
     @Test
-    fun testStableMapping_homeAtZero_boardsAtOneAndUp() {
+    fun testStableMapping_homeAtZero_scheduleAtOne_boardsAtTwoAndUp() {
         val boards = listOf(
             createFakeBoard("alpha", "Alpha"),
             createFakeBoard("beta", "Beta"),
@@ -63,14 +64,18 @@ class MainPagerAdapterTest {
         assertEquals(MainPagerAdapter.VIEW_TYPE_HOME, adapter.getItemViewType(0))
         assertEquals(0L, adapter.getItemId(0))
 
-        // Positions 1..3 are Boards in order
-        assertEquals(MainPagerAdapter.VIEW_TYPE_BOARD, adapter.getItemViewType(1))
+        // Position 1 is always Schedule Board
+        assertEquals(MainPagerAdapter.VIEW_TYPE_SCHEDULE, adapter.getItemViewType(1))
+        assertEquals(1L, adapter.getItemId(1))
+
+        // Positions 2..4 are Boards in order
         assertEquals(MainPagerAdapter.VIEW_TYPE_BOARD, adapter.getItemViewType(2))
         assertEquals(MainPagerAdapter.VIEW_TYPE_BOARD, adapter.getItemViewType(3))
+        assertEquals(MainPagerAdapter.VIEW_TYPE_BOARD, adapter.getItemViewType(4))
 
-        assertEquals(1, adapter.getBoardPagePosition("alpha"))
-        assertEquals(2, adapter.getBoardPagePosition("beta"))
-        assertEquals(3, adapter.getBoardPagePosition("gamma"))
+        assertEquals(2, adapter.getBoardPagePosition("alpha"))
+        assertEquals(3, adapter.getBoardPagePosition("beta"))
+        assertEquals(4, adapter.getBoardPagePosition("gamma"))
     }
 
     @Test
@@ -82,8 +87,8 @@ class MainPagerAdapterTest {
         )
         val adapter = MainPagerAdapter(boards)
 
-        // 1. Initial state: no playback
-        assertEquals(4, adapter.itemCount)
+        // 1. Initial state: no playback (Home + Schedule + 3 Boards = 5)
+        assertEquals(5, adapter.itemCount)
 
         // 2. Playback starts
         val playingState = MusicState(
@@ -95,7 +100,7 @@ class MainPagerAdapterTest {
         adapter.updateMusicState(playingState)
         assertEquals(
             "Page count must not increase when music starts playing",
-            4,
+            5,
             adapter.itemCount
         )
 
@@ -107,7 +112,7 @@ class MainPagerAdapterTest {
         adapter.updateMusicState(updatedState)
         assertEquals(
             "Page count must not change on playback metadata update",
-            4,
+            5,
             adapter.itemCount
         )
 
@@ -116,7 +121,7 @@ class MainPagerAdapterTest {
         adapter.updateMusicState(pausedState)
         assertEquals(
             "Page count must not change when music pauses",
-            4,
+            5,
             adapter.itemCount
         )
 
@@ -125,7 +130,7 @@ class MainPagerAdapterTest {
         adapter.updateMusicState(stoppedState)
         assertEquals(
             "Page count must not change when music stops",
-            4,
+            5,
             adapter.itemCount
         )
     }
@@ -139,28 +144,28 @@ class MainPagerAdapterTest {
         )
         val adapter = MainPagerAdapter(boards)
 
-        // Assert initial positions
-        assertEquals(1, adapter.getBoardPagePosition("b1"))
-        assertEquals(2, adapter.getBoardPagePosition("b2"))
-        assertEquals(3, adapter.getBoardPagePosition("b3"))
+        // Assert initial positions (Schedule board is at index 1, so boards start at index 2)
+        assertEquals(2, adapter.getBoardPagePosition("b1"))
+        assertEquals(3, adapter.getBoardPagePosition("b2"))
+        assertEquals(4, adapter.getBoardPagePosition("b3"))
 
         // Assert positions while playing
         adapter.updateMusicState(MusicState(isPlaying = true, title = "晴天", artist = "周杰伦"))
-        assertEquals(1, adapter.getBoardPagePosition("b1"))
-        assertEquals(2, adapter.getBoardPagePosition("b2"))
-        assertEquals(3, adapter.getBoardPagePosition("b3"))
+        assertEquals(2, adapter.getBoardPagePosition("b1"))
+        assertEquals(3, adapter.getBoardPagePosition("b2"))
+        assertEquals(4, adapter.getBoardPagePosition("b3"))
 
         // Assert positions while paused
         adapter.updateMusicState(MusicState(isPlaying = false, title = "晴天", artist = "周杰伦"))
-        assertEquals(1, adapter.getBoardPagePosition("b1"))
-        assertEquals(2, adapter.getBoardPagePosition("b2"))
-        assertEquals(3, adapter.getBoardPagePosition("b3"))
+        assertEquals(2, adapter.getBoardPagePosition("b1"))
+        assertEquals(3, adapter.getBoardPagePosition("b2"))
+        assertEquals(4, adapter.getBoardPagePosition("b3"))
 
         // Assert positions after stopping
         adapter.updateMusicState(MusicState(isPlaying = false))
-        assertEquals(1, adapter.getBoardPagePosition("b1"))
-        assertEquals(2, adapter.getBoardPagePosition("b2"))
-        assertEquals(3, adapter.getBoardPagePosition("b3"))
+        assertEquals(2, adapter.getBoardPagePosition("b1"))
+        assertEquals(3, adapter.getBoardPagePosition("b2"))
+        assertEquals(4, adapter.getBoardPagePosition("b3"))
     }
 
     @Test
@@ -172,10 +177,12 @@ class MainPagerAdapterTest {
         val adapter = MainPagerAdapter(boards)
 
         val homeIdInitial = adapter.getItemId(0)
-        val b1IdInitial = adapter.getItemId(1)
-        val b2IdInitial = adapter.getItemId(2)
+        val scheduleIdInitial = adapter.getItemId(1)
+        val b1IdInitial = adapter.getItemId(2)
+        val b2IdInitial = adapter.getItemId(3)
 
         assertEquals(0L, homeIdInitial)
+        assertEquals(1L, scheduleIdInitial)
         assertNotEquals(RecyclerView.NO_ID, b1IdInitial)
         assertNotEquals(RecyclerView.NO_ID, b2IdInitial)
         assertNotEquals(b1IdInitial, b2IdInitial)
@@ -183,14 +190,16 @@ class MainPagerAdapterTest {
         // Switch to playing
         adapter.updateMusicState(MusicState(isPlaying = true, title = "花海"))
         assertEquals(homeIdInitial, adapter.getItemId(0))
-        assertEquals(b1IdInitial, adapter.getItemId(1))
-        assertEquals(b2IdInitial, adapter.getItemId(2))
+        assertEquals(scheduleIdInitial, adapter.getItemId(1))
+        assertEquals(b1IdInitial, adapter.getItemId(2))
+        assertEquals(b2IdInitial, adapter.getItemId(3))
 
         // Switch to stopped
         adapter.updateMusicState(MusicState(isPlaying = false))
         assertEquals(homeIdInitial, adapter.getItemId(0))
-        assertEquals(b1IdInitial, adapter.getItemId(1))
-        assertEquals(b2IdInitial, adapter.getItemId(2))
+        assertEquals(scheduleIdInitial, adapter.getItemId(1))
+        assertEquals(b1IdInitial, adapter.getItemId(2))
+        assertEquals(b2IdInitial, adapter.getItemId(3))
     }
 
     @Test
@@ -204,22 +213,24 @@ class MainPagerAdapterTest {
     fun testGetItemId_outOfBounds_returnsNoId() {
         val boards = listOf(createFakeBoard("b1"))
         val adapter = MainPagerAdapter(boards)
-        assertEquals(RecyclerView.NO_ID, adapter.getItemId(5))
+        assertEquals(RecyclerView.NO_ID, adapter.getItemId(10))
         assertEquals(RecyclerView.NO_ID, adapter.getItemId(-1))
     }
 
     @Test
-    fun testEmptyBoards_onlyHomePage_countDoesNotChangeWithPlayback() {
+    fun testEmptyBoards_homeAndSchedulePages_countDoesNotChangeWithPlayback() {
         val adapter = MainPagerAdapter(emptyList())
-        assertEquals(1, adapter.itemCount)
+        assertEquals(2, adapter.itemCount)
         assertEquals(MainPagerAdapter.VIEW_TYPE_HOME, adapter.getItemViewType(0))
         assertEquals(0L, adapter.getItemId(0))
+        assertEquals(MainPagerAdapter.VIEW_TYPE_SCHEDULE, adapter.getItemViewType(1))
+        assertEquals(1L, adapter.getItemId(1))
 
         adapter.updateMusicState(MusicState(isPlaying = true))
-        assertEquals(1, adapter.itemCount)
+        assertEquals(2, adapter.itemCount)
 
         adapter.updateMusicState(MusicState(isPlaying = false))
-        assertEquals(1, adapter.itemCount)
+        assertEquals(2, adapter.itemCount)
     }
 
     @Test
@@ -243,9 +254,10 @@ class MainPagerAdapterTest {
 
         val initialItemCount = adapter.itemCount
         val initialHomeId = adapter.getItemId(0)
-        val initialB1Id = adapter.getItemId(1)
-        val initialB2Id = adapter.getItemId(2)
-        val initialB3Id = adapter.getItemId(3)
+        val initialScheduleId = adapter.getItemId(1)
+        val initialB1Id = adapter.getItemId(2)
+        val initialB2Id = adapter.getItemId(3)
+        val initialB3Id = adapter.getItemId(4)
 
         // Simulate configuration change to landscape
         val landscapeConfig = Configuration().apply {
@@ -255,15 +267,16 @@ class MainPagerAdapterTest {
 
         // Assert board list and page counts are preserved
         assertEquals("Page count must be preserved across orientation change", initialItemCount, adapter.itemCount)
-        assertEquals(1, adapter.getBoardPagePosition("b1"))
-        assertEquals(2, adapter.getBoardPagePosition("b2"))
-        assertEquals(3, adapter.getBoardPagePosition("b3"))
+        assertEquals(2, adapter.getBoardPagePosition("b1"))
+        assertEquals(3, adapter.getBoardPagePosition("b2"))
+        assertEquals(4, adapter.getBoardPagePosition("b3"))
 
         // Assert stable IDs are invariant
         assertEquals(initialHomeId, adapter.getItemId(0))
-        assertEquals(initialB1Id, adapter.getItemId(1))
-        assertEquals(initialB2Id, adapter.getItemId(2))
-        assertEquals(initialB3Id, adapter.getItemId(3))
+        assertEquals(initialScheduleId, adapter.getItemId(1))
+        assertEquals(initialB1Id, adapter.getItemId(2))
+        assertEquals(initialB2Id, adapter.getItemId(3))
+        assertEquals(initialB3Id, adapter.getItemId(4))
 
         // Assert music state is preserved
         assertEquals(playingState, adapter.getMusicState())
@@ -276,13 +289,14 @@ class MainPagerAdapterTest {
 
         // Assert state remains completely preserved
         assertEquals("Page count must be preserved after returning to portrait", initialItemCount, adapter.itemCount)
-        assertEquals(1, adapter.getBoardPagePosition("b1"))
-        assertEquals(2, adapter.getBoardPagePosition("b2"))
-        assertEquals(3, adapter.getBoardPagePosition("b3"))
+        assertEquals(2, adapter.getBoardPagePosition("b1"))
+        assertEquals(3, adapter.getBoardPagePosition("b2"))
+        assertEquals(4, adapter.getBoardPagePosition("b3"))
         assertEquals(initialHomeId, adapter.getItemId(0))
-        assertEquals(initialB1Id, adapter.getItemId(1))
-        assertEquals(initialB2Id, adapter.getItemId(2))
-        assertEquals(initialB3Id, adapter.getItemId(3))
+        assertEquals(initialScheduleId, adapter.getItemId(1))
+        assertEquals(initialB1Id, adapter.getItemId(2))
+        assertEquals(initialB2Id, adapter.getItemId(3))
+        assertEquals(initialB3Id, adapter.getItemId(4))
         assertEquals(playingState, adapter.getMusicState())
     }
 
@@ -308,32 +322,36 @@ class MainPagerAdapterTest {
             val config = if (i % 2 == 0) landConfig else portConfig
             adapter.onConfigurationChanged(config)
 
-            assertEquals(3, adapter.itemCount)
-            assertEquals(1, adapter.getBoardPagePosition("alpha"))
-            assertEquals(2, adapter.getBoardPagePosition("beta"))
+            assertEquals(4, adapter.itemCount)
+            assertEquals(2, adapter.getBoardPagePosition("alpha"))
+            assertEquals(3, adapter.getBoardPagePosition("beta"))
             assertEquals(musicState, adapter.getMusicState())
         }
     }
 
     @Test
-    fun testOnConfigurationChanged_whenNoBoards_preservesSingleHomePage() {
+    fun testOnConfigurationChanged_whenNoBoards_preservesHomeAndSchedulePages() {
         val adapter = MainPagerAdapter(emptyList())
-        assertEquals(1, adapter.itemCount)
+        assertEquals(2, adapter.itemCount)
 
         val landConfig = Configuration().apply {
             orientation = Configuration.ORIENTATION_LANDSCAPE
         }
         adapter.onConfigurationChanged(landConfig)
-        assertEquals(1, adapter.itemCount)
+        assertEquals(2, adapter.itemCount)
         assertEquals(MainPagerAdapter.VIEW_TYPE_HOME, adapter.getItemViewType(0))
         assertEquals(0L, adapter.getItemId(0))
+        assertEquals(MainPagerAdapter.VIEW_TYPE_SCHEDULE, adapter.getItemViewType(1))
+        assertEquals(1L, adapter.getItemId(1))
 
         val portConfig = Configuration().apply {
             orientation = Configuration.ORIENTATION_PORTRAIT
         }
         adapter.onConfigurationChanged(portConfig)
-        assertEquals(1, adapter.itemCount)
+        assertEquals(2, adapter.itemCount)
         assertEquals(MainPagerAdapter.VIEW_TYPE_HOME, adapter.getItemViewType(0))
         assertEquals(0L, adapter.getItemId(0))
+        assertEquals(MainPagerAdapter.VIEW_TYPE_SCHEDULE, adapter.getItemViewType(1))
+        assertEquals(1L, adapter.getItemId(1))
     }
 }

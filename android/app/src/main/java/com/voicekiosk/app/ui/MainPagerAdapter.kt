@@ -24,12 +24,14 @@ import com.voicekiosk.app.data.BoardComponent
 import com.voicekiosk.app.data.BoardModel
 import com.voicekiosk.app.media.MediaControlAction
 import com.voicekiosk.app.media.MusicState
+import com.voicekiosk.app.schedule.ScheduleItem
 
 /**
  * Pager adapter for the horizontal navigation container (ViewPager2).
  *
  * Page 0: Home screen (giant clock, Gregorian + weekday + Chinese lunar date, weather capsule, bottom glow arc, Now-Playing widget).
- * Pages 1..N: Dynamic board pages fetched from the bridge (Title, Checklist, List, KeyValue).
+ * Page 1: Schedule board page (today plus tomorrow timeline of alarms, countdowns, and schedules).
+ * Pages 2..N: Dynamic board pages fetched from the bridge (Title, Checklist, List, KeyValue).
  *
  * NOTE: Contains ZERO hardcoded board content and ZERO estimated-time fields.
  */
@@ -38,16 +40,21 @@ class MainPagerAdapter(
     private val onWakeInteraction: (() -> Unit)? = null,
     private val onItemToggle: ((boardId: String, itemId: String, completed: Boolean) -> Unit)? = null,
     private val onMediaControl: ((action: MediaControlAction) -> Unit)? = null,
-    private val onOpenNotificationSettings: (() -> Unit)? = null
+    private val onOpenNotificationSettings: (() -> Unit)? = null,
+    private var scheduleItems: List<ScheduleItem> = emptyList(),
+    private val onScheduleToggle: ((scheduleId: String) -> Unit)? = null,
+    private val onScheduleDelete: ((scheduleId: String) -> Unit)? = null
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
         const val VIEW_TYPE_HOME = 0
-        const val VIEW_TYPE_BOARD = 1
+        const val VIEW_TYPE_SCHEDULE = 1
+        const val VIEW_TYPE_BOARD = 2
     }
 
     private var musicState: MusicState? = null
     private var activeHomeViewHolder: HomeViewHolder? = null
+    private var activeScheduleViewHolder: ScheduleViewHolder? = null
     private val boardIdMap = mutableMapOf<String, Long>()
     private var nextBoardLongId = 100L
 
@@ -63,7 +70,8 @@ class MainPagerAdapter(
 
     override fun getItemId(position: Int): Long {
         if (position == 0) return 0L
-        val boardIndex = position - 1
+        if (position == 1) return 1L
+        val boardIndex = position - 2
         return if (boardIndex in boards.indices) {
             getStableBoardId(boards[boardIndex].boardId)
         } else {
@@ -74,7 +82,7 @@ class MainPagerAdapter(
     fun getBoardPagePosition(boardId: String): Int {
         val index = boards.indexOfFirst { it.boardId == boardId }
         if (index == -1) return -1
-        return index + 1
+        return index + 2
     }
 
     fun updateMusicState(state: MusicState) {
@@ -93,6 +101,7 @@ class MainPagerAdapter(
 
     fun onConfigurationChanged(newConfig: Configuration? = null) {
         activeHomeViewHolder?.reinflate(newConfig)
+        activeScheduleViewHolder?.onConfigurationChanged(newConfig)
         try {
             notifyDataSetChanged()
         } catch (_: Throwable) {}
@@ -103,6 +112,16 @@ class MainPagerAdapter(
     }
 
     fun getBoards(): List<BoardModel> = boards
+
+    fun getScheduleItems(): List<ScheduleItem> = scheduleItems
+
+    fun setScheduleItems(newItems: List<ScheduleItem>) {
+        this.scheduleItems = newItems
+        activeScheduleViewHolder?.bind(newItems)
+        try {
+            notifyItemChanged(1)
+        } catch (_: Throwable) {}
+    }
 
     fun getMusicState(): MusicState? = musicState
 
@@ -119,7 +138,7 @@ class MainPagerAdapter(
             val mutable = boards.toMutableList()
             mutable[index] = board
             boards = mutable
-            val adapterPosition = index + 1
+            val adapterPosition = index + 2
             try {
                 notifyItemChanged(adapterPosition)
             } catch (_: Throwable) {}
@@ -134,11 +153,15 @@ class MainPagerAdapter(
     }
 
     override fun getItemCount(): Int {
-        return 1 + boards.size
+        return 2 + boards.size
     }
 
     override fun getItemViewType(position: Int): Int {
-        return if (position == 0) VIEW_TYPE_HOME else VIEW_TYPE_BOARD
+        return when (position) {
+            0 -> VIEW_TYPE_HOME
+            1 -> VIEW_TYPE_SCHEDULE
+            else -> VIEW_TYPE_BOARD
+        }
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
@@ -153,6 +176,10 @@ class MainPagerAdapter(
                 }
                 HomeViewHolder(container, onWakeInteraction, onMediaControl, onOpenNotificationSettings)
             }
+            VIEW_TYPE_SCHEDULE -> {
+                val view = inflater.inflate(R.layout.schedule_page, parent, false)
+                ScheduleViewHolder(view, onScheduleToggle, onScheduleDelete)
+            }
             else -> {
                 val view = inflater.inflate(R.layout.fragment_board, parent, false)
                 BoardViewHolder(view, onItemToggle)
@@ -166,8 +193,12 @@ class MainPagerAdapter(
                 activeHomeViewHolder = holder
                 holder.bind(musicState, isMusicVisible = musicState?.isPlaying == true)
             }
+            is ScheduleViewHolder -> {
+                activeScheduleViewHolder = holder
+                holder.bind(scheduleItems)
+            }
             is BoardViewHolder -> {
-                val boardIndex = position - 1
+                val boardIndex = position - 2
                 if (boardIndex in boards.indices) {
                     holder.bind(boards[boardIndex])
                 }
@@ -182,6 +213,9 @@ class MainPagerAdapter(
                 activeHomeViewHolder = holder
                 holder.onAttached()
             }
+            is ScheduleViewHolder -> {
+                activeScheduleViewHolder = holder
+            }
         }
     }
 
@@ -193,6 +227,11 @@ class MainPagerAdapter(
                     activeHomeViewHolder = null
                 }
                 holder.onDetached()
+            }
+            is ScheduleViewHolder -> {
+                if (activeScheduleViewHolder === holder) {
+                    activeScheduleViewHolder = null
+                }
             }
         }
     }
@@ -206,6 +245,72 @@ class MainPagerAdapter(
                 }
                 holder.onDetached()
             }
+            is ScheduleViewHolder -> {
+                if (activeScheduleViewHolder === holder) {
+                    activeScheduleViewHolder = null
+                }
+            }
+        }
+    }
+
+    class ScheduleViewHolder(
+        itemView: View,
+        private val onScheduleToggle: ((scheduleId: String) -> Unit)?,
+        private val onScheduleDelete: ((scheduleId: String) -> Unit)?
+    ) : RecyclerView.ViewHolder(itemView) {
+        private val tvScheduleTitle: TextView = itemView.findViewById(R.id.tvScheduleTitle)
+        private val tvScheduleBadge: TextView = itemView.findViewById(R.id.tvScheduleBadge)
+        private val tvScheduleSubtitle: TextView = itemView.findViewById(R.id.tvScheduleSubtitle)
+        private val rvScheduleTimeline: RecyclerView = itemView.findViewById(R.id.rvScheduleTimeline)
+        private val emptyViewContainer: View = itemView.findViewById(R.id.emptyViewContainer)
+
+        private val timelineAdapter = ScheduleTimelineAdapter(
+            items = emptyList(),
+            onToggle = onScheduleToggle,
+            onDelete = onScheduleDelete
+        )
+
+        init {
+            val isLandscape = itemView.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+            rvScheduleTimeline.layoutManager = if (isLandscape) {
+                GridLayoutManager(itemView.context, 2)
+            } else {
+                LinearLayoutManager(itemView.context)
+            }
+            rvScheduleTimeline.adapter = timelineAdapter
+        }
+
+        fun onConfigurationChanged(newConfig: Configuration?) {
+            val isLandscape = (newConfig?.orientation ?: itemView.resources.configuration.orientation) == Configuration.ORIENTATION_LANDSCAPE
+            val currentLm = rvScheduleTimeline.layoutManager
+            if (isLandscape && currentLm !is GridLayoutManager) {
+                rvScheduleTimeline.layoutManager = GridLayoutManager(itemView.context, 2)
+            } else if (!isLandscape && currentLm !is LinearLayoutManager) {
+                rvScheduleTimeline.layoutManager = LinearLayoutManager(itemView.context)
+            }
+        }
+
+        fun bind(items: List<ScheduleItem>) {
+            if (items.isEmpty()) {
+                rvScheduleTimeline.visibility = View.GONE
+                emptyViewContainer.visibility = View.VISIBLE
+                tvScheduleBadge.visibility = View.GONE
+            } else {
+                rvScheduleTimeline.visibility = View.VISIBLE
+                emptyViewContainer.visibility = View.GONE
+                val total = items.size
+                val completedCount = items.count { it.isCompleted }
+                val activeCount = total - completedCount
+                tvScheduleBadge.text = "$activeCount 项待办 · $completedCount 项已完成"
+                tvScheduleBadge.visibility = View.VISIBLE
+            }
+
+            val now = java.time.LocalDate.now()
+            val formatter = java.time.format.DateTimeFormatter.ofPattern("M月d日")
+            val tomorrow = now.plusDays(1)
+            tvScheduleSubtitle.text = "${now.format(formatter)} 至 ${tomorrow.format(formatter)}"
+
+            timelineAdapter.setItems(items)
         }
     }
 

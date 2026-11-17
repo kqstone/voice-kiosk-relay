@@ -41,11 +41,15 @@ import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.viewpager2.widget.ViewPager2
 import com.voicekiosk.app.bridge.OriginBoundHost
+import com.voicekiosk.app.countdown.CountdownManager
+import com.voicekiosk.app.countdown.CountdownState
 import com.voicekiosk.app.data.BoardModel
 import com.voicekiosk.app.data.BoardRepository
 import com.voicekiosk.app.media.MediaControlAction
 import com.voicekiosk.app.media.MusicState
 import com.voicekiosk.app.media.MusicStateManager
+import com.voicekiosk.app.schedule.ScheduleItem
+import com.voicekiosk.app.schedule.ScheduleSyncManager
 import com.voicekiosk.app.ui.MainPagerAdapter
 import com.voicekiosk.app.ui.PageIndicatorView
 import com.voicekiosk.app.ui.VoiceListeningOverlayView
@@ -85,6 +89,7 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
     private lateinit var pageIndicator: PageIndicatorView
     private lateinit var pagerAdapter: MainPagerAdapter
     private lateinit var boardRepository: BoardRepository
+    private lateinit var scheduleSyncManager: ScheduleSyncManager
     private lateinit var musicStateManager: MusicStateManager
     private lateinit var settingsButton: TextView
     private lateinit var listeningOverlayContainer: FrameLayout
@@ -234,6 +239,9 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         if (::boardRepository.isInitialized) {
             boardRepository.stop()
         }
+        if (::scheduleSyncManager.isInitialized) {
+            scheduleSyncManager.stop()
+        }
         AndroidReleaseUpdatePlatform.getManager(this).unregisterListener(this)
         WakeWordEventBus.unregister(this)
         mainHandler.removeCallbacksAndMessages(null)
@@ -282,6 +290,16 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             })
         }
 
+        scheduleSyncManager = ScheduleSyncManager(this).apply {
+            setListener(object : ScheduleSyncManager.Listener {
+                override fun onSchedulesUpdated(items: List<ScheduleItem>) {
+                    mainHandler.post {
+                        pagerAdapter.setScheduleItems(items)
+                    }
+                }
+            })
+        }
+
         pagerAdapter = MainPagerAdapter(
             boards = emptyList(),
             onWakeInteraction = { triggerVoiceWakeFromUi() },
@@ -293,6 +311,13 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
             },
             onOpenNotificationSettings = {
                 musicStateManager.openNotificationAccessSettings()
+            },
+            scheduleItems = scheduleSyncManager.getTimelineItemsForBoard(),
+            onScheduleToggle = { scheduleId ->
+                scheduleSyncManager.toggleComplete(scheduleId)
+            },
+            onScheduleDelete = { scheduleId ->
+                scheduleSyncManager.deleteItem(scheduleId)
             }
         )
         viewPager.adapter = pagerAdapter
@@ -300,6 +325,15 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
         pageIndicator.setPageCount(pagerAdapter.itemCount)
 
         boardRepository.start()
+        scheduleSyncManager.start()
+
+        CountdownManager.addListener(object : CountdownManager.Listener {
+            override fun onCountdownStateChanged(state: CountdownState) {
+                if (::scheduleSyncManager.isInitialized) {
+                    scheduleSyncManager.notifyLocalMutation()
+                }
+            }
+        })
 
         viewPager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageScrolled(position: Int, positionOffset: Float, positionOffsetPixels: Int) {
@@ -506,6 +540,9 @@ class MainActivity : FragmentActivity(), WakeWordEventBus.Listener, ReleaseUpdat
                         VoiceKioskService.requestMetaHandshake(this@MainActivity)
                         if (::boardRepository.isInitialized) {
                             boardRepository.onNetworkAvailable()
+                        }
+                        if (::scheduleSyncManager.isInitialized) {
+                            scheduleSyncManager.onNetworkAvailable()
                         }
                     }
                 }
