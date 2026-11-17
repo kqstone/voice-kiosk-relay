@@ -24,6 +24,7 @@ class RuleRouter {
             ?: volume(s, previous)
             ?: mediaControl(s, previous)
             ?: withoutReason(s)?.let { core -> volume(core, previous) ?: mediaControl(core, previous) }
+            ?: alarmClock(s)
             ?: timer(s)
             ?: mediaPlay(s)
             ?: cloudShortcut(s)
@@ -81,6 +82,24 @@ class RuleRouter {
         // "继续" means "continue talking" after a cloud answer; only media right after media
         val lastWasMedia = previous?.intent == Intents.MEDIA_CONTROL || previous?.intent == Intents.MEDIA_PLAY
         if (lastWasMedia && s in RESUME_AFTER_MEDIA) return local(Intents.MEDIA_CONTROL, "action" to "resume")
+        return null
+    }
+
+    private fun alarmClock(s: String): RouteDecision? {
+        if (ALARM_CANCEL.matches(s)) return local(Intents.ALARM, "action" to "cancel")
+        for (p in ALARM_FORMS) {
+            val m = p.matchEntire(s) ?: continue
+            val timePart = m.groups["time"]?.value?.removePrefix("在")?.removePrefix("于") ?: continue
+            val time = ChineseTimeParser.parse(timePart) ?: continue
+            return local(
+                Intents.ALARM,
+                "action" to "set",
+                "day_offset" to time.dayOffset.toString(),
+                "hour" to time.hour.toString(),
+                "minute" to time.minute.toString(),
+                "recurrence" to time.recurrence
+            )
+        }
         return null
     }
 
@@ -324,6 +343,14 @@ class RuleRouter {
         /** "来点吃的", "放点水", "来点新闻": not music. */
         private val NOT_MUSIC = Regex("(?:好)?(?:吃|喝|玩|看)(?:的)?|热水|水|饭|茶|咖啡|零食|新闻|笑话|故事|电视|视频|电影|广播|假")
         private val PLAY_ARTIST_SONGS = Regex("(?:放|听|来点|播)(.+?)的(?:歌|歌曲|音乐|专辑)")
+
+        private val ALARM_CANCEL = Regex("(?:取消|关掉|关闭|停掉|停止|结束)(?:所有)?闹钟|(?:把)?闹钟(?:关掉|关闭|关了|取消|停掉|停止)")
+        private val ALARM_FORMS = listOf(
+            Regex("(?:设置|设|定|来)?(?:一个|个)?(?<time>.+?)(?:的)?闹钟"),
+            Regex("(?:设置|设|定)?(?:一个|个)?闹钟(?<time>.+)"),
+            Regex("(?<time>.+?)(?:定个闹钟|设个闹钟|定闹钟|设闹钟|设置闹钟)"),
+            Regex("(?:提醒我)?(?<time>.+?)(?:叫我起床|喊我起床|叫醒我|提醒我起床|叫我一声|喊我一声|叫我一下|喊我一下|叫我|喊我)")
+        )
 
         private val TIMER_CANCEL = Regex("(?:取消|关掉|关闭|停止|停掉|结束)(?:倒计时|计时器|计时|定时器|定时|提醒)")
         private val TIMER_FORMS = listOf(

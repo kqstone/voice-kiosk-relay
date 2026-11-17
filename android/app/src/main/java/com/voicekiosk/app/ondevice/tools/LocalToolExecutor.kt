@@ -1,5 +1,10 @@
 package com.voicekiosk.app.ondevice.tools
 
+import android.content.Context
+import android.util.Log
+import com.voicekiosk.app.alarm.AlarmItem
+import com.voicekiosk.app.alarm.AlarmScheduler
+import com.voicekiosk.app.alarm.LocalAlarmStore
 import com.voicekiosk.app.ondevice.route.Intents
 import com.voicekiosk.app.ondevice.route.RouteDecision
 import java.time.Instant
@@ -67,6 +72,12 @@ class LocalToolExecutor(
     private val platform: LocalPlatform,
     /** Null = no local weather (the intent then goes to the cloud). */
     private val weather: WeatherSource? = null,
+    /** Android Context for AlarmManager and LocalAlarmStore. */
+    private val context: Context? = null,
+    /** Optional explicit alarm store for unit testing or custom injection. */
+    private val alarmStore: LocalAlarmStore? = null,
+    /** Optional scheduler lambda for unit testing. */
+    private val alarmScheduler: ((Context, AlarmItem) -> Boolean)? = null,
     /** S5: favourite artist from the long-term memory cache ("放我喜欢的歌"). */
     private val favoriteArtist: () -> String? = { null },
     /** The settings' weather city, used when the utterance names none (kept last: trailing lambda). */
@@ -114,6 +125,25 @@ class LocalToolExecutor(
             timerSeconds(d) == null -> "bad duration"
             else -> null
         }
+        Intents.ALARM -> {
+            val action = d.slots["action"] ?: "set"
+            when (action) {
+                "cancel" -> if (context == null && alarmStore == null) "alarm unavailable" else null
+                "set" -> {
+                    val hour = d.slots["hour"]?.trim()?.toIntOrNull()
+                    val minute = d.slots["minute"]?.trim()?.toIntOrNull()
+                    val dayOffset = d.slots["day_offset"]?.trim()?.toIntOrNull() ?: 0
+                    when {
+                        context == null && alarmStore == null -> "alarm unavailable"
+                        hour == null || hour !in 0..23 -> "bad hour"
+                        minute == null || minute !in 0..59 -> "bad minute"
+                        dayOffset < 0 -> "bad day_offset"
+                        else -> null
+                    }
+                }
+                else -> "bad action"
+            }
+        }
         else -> "not a local tool intent"
     }
 
@@ -127,6 +157,7 @@ class LocalToolExecutor(
             Intents.MEDIA_CONTROL -> media(MEDIA_ACTIONS.getValue(d.slots.getValue("action")))
             Intents.MEDIA_PLAY -> play(d)
             Intents.TIMER -> timer(d)
+            Intents.ALARM -> alarm(d)
             Intents.WEATHER -> weather(d)
             else -> ToolResult.fallback("not a local tool intent")
         }
@@ -259,7 +290,82 @@ class LocalToolExecutor(
         return s.takeIf { it in 1..MAX_TIMER_SECONDS }
     }
 
+    private fun alarm(d: RouteDecision): ToolResult {
+        val action = d.slots["action"] ?: "set"
+        val store = alarmStore ?: context?.let { LocalAlarmStore.get(it) }
+
+        if (action == "cancel") {
+            val activeAlarms = store?.getActiveAlarms().orEmpty()
+            if (activeAlarms.isEmpty()) {
+                return ToolResult.ok("现在没有已设置的闹钟。")
+            }
+            for (alarm in activeAlarms) {
+                if (context != null) {
+                    AlarmScheduler.cancelAlarm(context, alarm.id)
+                } else {
+                    store?.updateStatus(alarm.id, AlarmItem.STATUS_CANCELLED)
+                }
+            }
+            return ToolResult.ok("已取消闹钟。")
+        }
+
+        val hour = d.slots["hour"]?.trim()?.toIntOrNull() ?: return ToolResult.fallback("bad hour")
+        val minute = d.slots["minute"]?.trim()?.toIntOrNull() ?: 0
+        val dayOffset = d.slots["day_offset"]?.trim()?.toIntOrNull() ?: 0
+        val recurrence = d.slots["recurrence"].orEmpty()
+
+        val now = ZonedDateTime.ofInstant(Instant.ofEpochMilli(platform.nowMillis()), platform.zone())
+        var targetDate = now.toLocalDate().plusDays(dayOffset.toLong())
+        var targetZdt = targetDate.atTime(hour, minute).atZone(platform.zone())
+
+        var effectiveDayOffset = dayOffset
+        if (dayOffset == 0 && recurrence.isEmpty() && targetZdt.toInstant().toEpochMilli() <= platform.nowMillis()) {
+            effectiveDayOffset = 1
+            targetDate = targetDate.plusDays(1)
+            targetZdt = targetDate.atTime(hour, minute).atZone(platform.zone())
+        }
+
+        val targetTimeUtc = targetZdt.toInstant().toEpochMilli() / 1000.0
+        val item = AlarmItem(
+            title = "闹钟",
+            targetTimeUtc = targetTimeUtc,
+            recurrence = recurrence,
+            status = AlarmItem.STATUS_ACTIVE,
+            origin = AlarmItem.ORIGIN_APK_VOICE,
+            metadata = mapOf("label" to "voice_alarm")
+        )
+
+        store?.saveAlarm(item)
+        if (context != null) {
+            val scheduled = (alarmScheduler ?: { ctx, itm -> AlarmScheduler.scheduleAlarm(ctx, itm) })(context, item)
+            if (!scheduled) {
+                Log.w(TAG, "AlarmScheduler failed to schedule alarm ${item.id}")
+            }
+        }
+
+        val spokenTimeText = spokenTime(hour, minute)
+        val dayWord = when {
+            recurrence == "FREQ=DAILY" -> "每天"
+            recurrence == "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR" -> "工作日"
+            recurrence == "FREQ=WEEKLY;BYDAY=SA,SU" -> "周末"
+            recurrence.startsWith("FREQ=WEEKLY;BYDAY=") -> {
+                when (recurrence.substringAfter("BYDAY=")) {
+                    "MO" -> "每周一"; "TU" -> "每周二"; "WE" -> "每周三"; "TH" -> "每周四"
+                    "FR" -> "每周五"; "SA" -> "每周六"; "SU" -> "每周日"
+                    else -> "每周"
+                }
+            }
+            effectiveDayOffset == 1 -> "明天"
+            effectiveDayOffset == 2 -> "后天"
+            effectiveDayOffset == 0 -> "今天"
+            else -> ""
+        }
+
+        return ToolResult.ok("好的，已设置${dayWord}${spokenTimeText}的闹钟。")
+    }
+
     companion object {
+        private const val TAG = "LocalToolExecutor"
         const val MAX_NAME = 24
         const val MAX_LABEL = 12
         const val MAX_TIMER_SECONDS = 3 * 3600

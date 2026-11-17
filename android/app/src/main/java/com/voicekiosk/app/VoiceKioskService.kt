@@ -1101,7 +1101,8 @@ class VoiceKioskService : Service(), TextToSpeech.OnInitListener {
                 rules = RuleRouter(),
                 classifier = routerModel?.classifier(),
                 tools = LocalToolExecutor(
-                    platform,
+                    platform = platform,
+                    context = applicationContext,
                     favoriteArtist = { memoryManager?.favoriteArtist() },
                     weather = if (AppConfig.isOnDeviceWeatherEnabled(applicationContext)) com.voicekiosk.app.ondevice.tools.OpenMeteoWeatherSource() else null,
                     defaultCity = {

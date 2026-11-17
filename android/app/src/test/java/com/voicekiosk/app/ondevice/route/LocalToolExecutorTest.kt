@@ -1,5 +1,7 @@
 package com.voicekiosk.app.ondevice.route
 
+import com.voicekiosk.app.alarm.AlarmItem
+import com.voicekiosk.app.alarm.LocalAlarmStore
 import com.voicekiosk.app.ondevice.tools.LocalPlatform
 import com.voicekiosk.app.ondevice.tools.LocalToolExecutor
 import com.voicekiosk.app.ondevice.tools.MediaAction
@@ -98,6 +100,45 @@ class LocalToolExecutorTest {
     }
 
     @Test
+    fun alarms() {
+        val store = LocalAlarmStore(null)
+        val alarmExecutor = LocalToolExecutor(p, alarmStore = store)
+
+        // Set tomorrow morning 7:30 alarm
+        val setRes1 = alarmExecutor.execute(d(Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "30"))
+        assertTrue(setRes1.handled)
+        assertEquals("好的，已设置明天早上7点30分的闹钟。", setRes1.reply)
+        assertEquals(1, store.getActiveAlarms().size)
+        val alarm1 = store.getActiveAlarms().first()
+        assertEquals("闹钟", alarm1.title)
+        assertEquals(AlarmItem.STATUS_ACTIVE, alarm1.status)
+        assertEquals("", alarm1.recurrence)
+
+        // Set daily 8:00 alarm
+        val setRes2 = alarmExecutor.execute(d(Intents.ALARM, "action" to "set", "hour" to "8", "minute" to "0", "recurrence" to "FREQ=DAILY"))
+        assertTrue(setRes2.handled)
+        assertEquals("好的，已设置每天早上8点整的闹钟。", setRes2.reply)
+        assertEquals(2, store.getActiveAlarms().size)
+
+        // Set weekday 7:30 alarm
+        val setRes3 = alarmExecutor.execute(d(Intents.ALARM, "action" to "set", "hour" to "7", "minute" to "30", "recurrence" to "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"))
+        assertTrue(setRes3.handled)
+        assertEquals("好的，已设置工作日早上7点30分的闹钟。", setRes3.reply)
+        assertEquals(3, store.getActiveAlarms().size)
+
+        // Cancel alarms
+        val cancelRes = alarmExecutor.execute(d(Intents.ALARM, "action" to "cancel"))
+        assertTrue(cancelRes.handled)
+        assertEquals("已取消闹钟。", cancelRes.reply)
+        assertEquals(0, store.getActiveAlarms().size)
+
+        // Cancel when none active
+        val cancelNoneRes = alarmExecutor.execute(d(Intents.ALARM, "action" to "cancel"))
+        assertTrue(cancelNoneRes.handled)
+        assertEquals("现在没有已设置的闹钟。", cancelNoneRes.reply)
+    }
+
+    @Test
     fun validationRejectsAnythingOffTheWhitelist() {
         assertNotNull(x.validate(d(Intents.VOLUME, "level" to "150")))
         assertNotNull(x.validate(d(Intents.VOLUME, "level" to "abc")))
@@ -112,7 +153,15 @@ class LocalToolExecutorTest {
         assertNotNull(x.validate(d(Intents.CHITCHAT)))
         assertNotNull(x.validate(d(Intents.MEMORY)))
         assertNotNull(x.validate(d(Intents.TIME, "day_offset" to "30")))
+        assertNotNull("alarm without store/context is unavailable", x.validate(d(Intents.ALARM, "action" to "set", "hour" to "7", "minute" to "0")))
         assertNull(x.validate(d(Intents.VOLUME, "level" to "30")))
+
+        val store = LocalAlarmStore(null)
+        val alarmExecutor = LocalToolExecutor(p, alarmStore = store)
+        assertNull(alarmExecutor.validate(d(Intents.ALARM, "action" to "set", "hour" to "7", "minute" to "0")))
+        assertNotNull(alarmExecutor.validate(d(Intents.ALARM, "action" to "set", "hour" to "25", "minute" to "0")))
+        assertNotNull(alarmExecutor.validate(d(Intents.ALARM, "action" to "set", "hour" to "7", "minute" to "65")))
+        assertNotNull(alarmExecutor.validate(d(Intents.ALARM, "action" to "invalid_action")))
         assertTrue(x.execute(d(Intents.WEATHER)).fallbackToCloud)
     }
 }

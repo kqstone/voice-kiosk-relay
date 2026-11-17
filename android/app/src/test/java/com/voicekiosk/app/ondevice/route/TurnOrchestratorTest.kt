@@ -205,6 +205,21 @@ class TurnOrchestratorTest {
     }
 
     @Test
+    fun alarmRuleAnswersLocallyWhenStoreAvailable() {
+        val store = com.voicekiosk.app.alarm.LocalAlarmStore(null)
+        val o = TurnOrchestrator(
+            TurnOrchestrator.Config(chitchatEnabled = false),
+            RuleRouter(), null, LocalToolExecutor(platform, weather, alarmStore = store) { com.voicekiosk.app.ondevice.tools.City("上海", 31.2, 121.5) }, ctx,
+            cloud = { req -> cloudRequests += req; Result.success(CloudReply(cloudReplyText)) },
+            clock = { clockTime }, log = { logs += it }, smallTalkReplies = fakeReplies
+        )
+        val r = o.handle("设个明天早上七点的闹钟")
+        assertEquals(TurnSource.LOCAL_RULE, r.source)
+        assertEquals("好的，已设置明天早上7点整的闹钟。", r.reply)
+        assertEquals(1, store.getActiveAlarms().size)
+    }
+
+    @Test
     fun weatherRuleAnswersLocallyWithDefaultCityAndEllipsis() {
         val o = orch()
         val r = o.handle("今天天气怎么样")

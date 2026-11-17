@@ -17,6 +17,7 @@ object Intents {
     const val MEDIA_CONTROL = "media_control"
     const val VOLUME = "volume_set"
     const val TIMER = "timer_set"
+    const val ALARM = "alarm_set"
     const val BOARD = "board_switch"
     const val RESET = "session_reset"
     const val MEMORY = "memory_command"

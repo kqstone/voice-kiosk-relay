@@ -183,10 +183,119 @@ class RuleRouterTest {
 
     @Test
     fun timerNegatives() {
-        for (t in listOf("计时器怎么用", "五分钟有多少秒", "明天早上七点叫我", "设个闹钟明天早上七点", "计时十个小时", "一小时后天气怎么样",
+        for (t in listOf("计时器怎么用", "五分钟有多少秒", "计时十个小时", "一小时后天气怎么样",
                 "提醒我买牛奶")) {
             none(t)
         }
+    }
+
+    @Test
+    fun alarmClockRouting() {
+        // Morning cases
+        local("明天早上7点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("明天早上七点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("设一个明天早上七点的闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("定一个明天早上七点的闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("明天早上七点叫我", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("明天早上七点叫我起床", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("设个闹钟明天早上七点", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("定闹钟明天早上7点", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("明早八点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "8", "minute" to "0", "recurrence" to "")
+        local("明早八点叫我起床", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "8", "minute" to "0", "recurrence" to "")
+        local("早上六点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "6", "minute" to "0", "recurrence" to "")
+        local("早晨六点叫我", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "6", "minute" to "0", "recurrence" to "")
+        local("上午十点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "10", "minute" to "0", "recurrence" to "")
+        local("明天上午九点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "9", "minute" to "0", "recurrence" to "")
+        local("后天上午九点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "2", "hour" to "9", "minute" to "0", "recurrence" to "")
+        local("凌晨五点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "5", "minute" to "0", "recurrence" to "")
+
+        // Afternoon / Noon cases
+        local("今天下午两点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "14", "minute" to "0", "recurrence" to "")
+        local("下午两点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "14", "minute" to "0", "recurrence" to "")
+        local("定一个下午三点的闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "15", "minute" to "0", "recurrence" to "")
+        local("明天下午四点叫我", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "16", "minute" to "0", "recurrence" to "")
+        local("下午两点十五叫我", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "14", "minute" to "15", "recurrence" to "")
+        local("下午两点十五分闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "14", "minute" to "15", "recurrence" to "")
+        local("今天下午两点一刻闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "14", "minute" to "15", "recurrence" to "")
+        local("中午十二点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "12", "minute" to "0", "recurrence" to "")
+        local("中午十二点半叫我", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "12", "minute" to "30", "recurrence" to "")
+        local("中午一点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "13", "minute" to "0", "recurrence" to "")
+        local("明天中午一点半闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "13", "minute" to "30", "recurrence" to "")
+
+        // Evening / Night cases
+        local("晚上八点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "20", "minute" to "0", "recurrence" to "")
+        local("今晚八点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "20", "minute" to "0", "recurrence" to "")
+        local("明晚十点半闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "22", "minute" to "30", "recurrence" to "")
+        local("晚上九点叫我", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "21", "minute" to "0", "recurrence" to "")
+        local("明天晚上七点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "19", "minute" to "0", "recurrence" to "")
+        local("傍晚六点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "18", "minute" to "0", "recurrence" to "")
+        local("夜里十一点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "23", "minute" to "0", "recurrence" to "")
+        local("半夜十二点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "0", "minute" to "0", "recurrence" to "")
+
+        // Tomorrow / Day cases
+        local("明天早上八点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "8", "minute" to "0", "recurrence" to "")
+        local("明天七点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("明天七点半叫我起床", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "30", "recurrence" to "")
+        local("明天下午五点叫我", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "17", "minute" to "0", "recurrence" to "")
+        local("后天早上七点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "2", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("明早七点半喊我", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "30", "recurrence" to "")
+
+        // Weekdays / Recurring cases
+        local("每天早上八点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "8", "minute" to "0", "recurrence" to "FREQ=DAILY")
+        local("每天早上八点叫我起床", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "8", "minute" to "0", "recurrence" to "FREQ=DAILY")
+        local("每天早上八点定个闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "8", "minute" to "0", "recurrence" to "FREQ=DAILY")
+        local("工作日七点半闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "7", "minute" to "30", "recurrence" to "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR")
+        local("工作日早上七点半闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "7", "minute" to "30", "recurrence" to "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR")
+        local("工作日早上七点叫我起床", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "7", "minute" to "0", "recurrence" to "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR")
+        local("工作日七点半定个闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "7", "minute" to "30", "recurrence" to "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR")
+        local("周一到周五早上七点半闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "7", "minute" to "30", "recurrence" to "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR")
+        local("周末早上九点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "9", "minute" to "0", "recurrence" to "FREQ=WEEKLY;BYDAY=SA,SU")
+        local("双休日早上九点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "9", "minute" to "0", "recurrence" to "FREQ=WEEKLY;BYDAY=SA,SU")
+        local("每周一早上八点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "8", "minute" to "0", "recurrence" to "FREQ=WEEKLY;BYDAY=MO")
+        local("每周五下午四点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "16", "minute" to "0", "recurrence" to "FREQ=WEEKLY;BYDAY=FR")
+
+        // Half past & Quarter past cases
+        local("明早七点半叫我", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "30", "recurrence" to "")
+        local("七点半闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "7", "minute" to "30", "recurrence" to "")
+        local("定个七点半的闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "7", "minute" to "30", "recurrence" to "")
+        local("早上六点半闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "6", "minute" to "30", "recurrence" to "")
+        local("下午两点半闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "14", "minute" to "30", "recurrence" to "")
+        local("明天下午三点半叫我", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "15", "minute" to "30", "recurrence" to "")
+        local("七点一刻闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "7", "minute" to "15", "recurrence" to "")
+        local("明早七点一刻叫我", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "15", "recurrence" to "")
+        local("下午两点一刻叫我", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "14", "minute" to "15", "recurrence" to "")
+        local("七点三刻闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "7", "minute" to "45", "recurrence" to "")
+        local("明早七点三刻叫我起床", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "45", "recurrence" to "")
+        local("差五分八点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "7", "minute" to "55", "recurrence" to "")
+        local("差一刻八点叫我", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "7", "minute" to "45", "recurrence" to "")
+
+        // Alarm cancellations
+        local("取消闹钟", Intents.ALARM, "action" to "cancel")
+        local("关掉闹钟", Intents.ALARM, "action" to "cancel")
+        local("关闭闹钟", Intents.ALARM, "action" to "cancel")
+        local("把闹钟关了", Intents.ALARM, "action" to "cancel")
+        local("把闹钟关掉", Intents.ALARM, "action" to "cancel")
+        local("停掉闹钟", Intents.ALARM, "action" to "cancel")
+    }
+
+    @Test
+    fun alarmVsTimerRegression() {
+        // Documented regression: "明天早上七点的闹钟" must NOT be misclassified as a 7-minute timer!
+        local("明天早上七点的闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("设个明天早上七点的闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("明早七点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("七点闹钟", Intents.ALARM, "action" to "set", "day_offset" to "0", "hour" to "7", "minute" to "0", "recurrence" to "")
+        local("定一个明天早上七点半的闹钟", Intents.ALARM, "action" to "set", "day_offset" to "1", "hour" to "7", "minute" to "30", "recurrence" to "")
+
+        // Duration timer expressions must route to timer, never alarm
+        local("定个45分钟的闹钟", Intents.TIMER, "seconds" to "2700")
+        local("五分钟的闹钟", Intents.TIMER, "seconds" to "300")
+        local("设一个十分钟的闹钟", Intents.TIMER, "seconds" to "600")
+        local("半小时闹钟", Intents.TIMER, "seconds" to "1800")
+        local("七分钟闹钟", Intents.TIMER, "seconds" to "420")
+        local("倒计时七分钟", Intents.TIMER, "seconds" to "420")
+        local("七分钟倒计时", Intents.TIMER, "seconds" to "420")
+        local("7分钟后叫我", Intents.TIMER, "seconds" to "420")
     }
 
     @Test
