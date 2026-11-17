@@ -98,6 +98,7 @@ class LocalToolExecutor(
     ) : this(
         platform = platform,
         weather = weather,
+        context = null,
         defaultCity = defaultCity
     )
 
