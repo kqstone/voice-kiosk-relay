@@ -18,6 +18,8 @@ import com.voicekiosk.app.AppConfig
 import com.voicekiosk.app.R
 import com.voicekiosk.app.WeatherInfo
 import com.voicekiosk.app.WeatherManager
+import com.voicekiosk.app.countdown.CountdownManager
+import com.voicekiosk.app.countdown.CountdownState
 import com.voicekiosk.app.data.BoardComponent
 import com.voicekiosk.app.data.BoardModel
 import com.voicekiosk.app.media.MediaControlAction
@@ -304,7 +306,7 @@ class MainPagerAdapter(
         private val onWakeInteraction: (() -> Unit)?,
         private val onMediaControl: ((MediaControlAction) -> Unit)? = null,
         private val onOpenNotificationSettings: (() -> Unit)? = null
-    ) : RecyclerView.ViewHolder(itemView), WeatherManager.WeatherListener {
+    ) : RecyclerView.ViewHolder(itemView), WeatherManager.WeatherListener, CountdownManager.Listener {
 
         private var tvDateLine: TextView? = null
         private var textClock: TextClock? = null
@@ -316,6 +318,9 @@ class MainPagerAdapter(
         private var tvWakePrompt: TextView? = null
 
         var musicWidgetController: HomeMusicWidgetController? = null
+            private set
+
+        var countdownWidgetController: HomeCountdownWidgetController? = null
             private set
 
         private var currentMusicState: MusicState? = null
@@ -382,10 +387,27 @@ class MainPagerAdapter(
             } else {
                 null
             }
+
+            val countdownView: View? = root.findViewById(R.id.layoutCountdown)
+            countdownWidgetController = if (countdownView != null) {
+                try {
+                    HomeCountdownWidgetController(
+                        rootView = countdownView,
+                        onCancel = { CountdownManager.cancelTimers() },
+                        onDismiss = { CountdownManager.dismissCompletion() }
+                    )
+                } catch (_: Throwable) {
+                    null
+                }
+            } else {
+                null
+            }
         }
 
         fun reinflate(newConfig: Configuration? = null) {
             val container = itemView as? ViewGroup ?: return
+            stopCarousel()
+            countdownWidgetController?.onDetached()
             musicWidgetController?.onDetached()
             container.removeAllViews()
 
@@ -406,6 +428,9 @@ class MainPagerAdapter(
 
             if (isAttachedToWindow) {
                 musicWidgetController?.onAttached()
+                countdownWidgetController?.onAttached()
+                CountdownManager.addListener(this)
+                syncWidgetVisibilities(animate = false)
             }
         }
 
@@ -474,21 +499,15 @@ class MainPagerAdapter(
             val stateToBind = musicState ?: currentMusicState
             if (stateToBind != null) {
                 musicWidgetController?.bind(stateToBind)
-                musicWidgetController?.setVisible(isMusicVisible, animate = false)
-            } else {
-                musicWidgetController?.setVisible(false, animate = false)
             }
+            syncWidgetVisibilities(animate = false)
         }
 
         fun updateMusicState(state: MusicState) {
             currentMusicState = state
             isMusicVisible = state.isPlaying
             musicWidgetController?.bind(state)
-            if (state.isPlaying) {
-                musicWidgetController?.setVisible(true, animate = true)
-            } else {
-                musicWidgetController?.setVisible(false, animate = true)
-            }
+            syncWidgetVisibilities(animate = true)
         }
 
         fun setMusicVisibility(visible: Boolean, state: MusicState? = null) {
@@ -499,7 +518,7 @@ class MainPagerAdapter(
             if (state != null) {
                 musicWidgetController?.bind(state)
             }
-            musicWidgetController?.setVisible(visible, animate = true)
+            syncWidgetVisibilities(animate = true)
         }
 
         fun onAttached() {
@@ -515,15 +534,102 @@ class MainPagerAdapter(
                 WeatherManager.getCachedWeatherInfo(context)?.let { bindWeatherInfo(it) }
             } catch (_: Throwable) {}
             musicWidgetController?.onAttached()
+            countdownWidgetController?.onAttached()
+            CountdownManager.addListener(this)
+            syncWidgetVisibilities(animate = false)
         }
 
         fun onDetached() {
             isAttachedToWindow = false
+            stopCarousel()
+            CountdownManager.removeListener(this)
+            countdownWidgetController?.onDetached()
             musicWidgetController?.onDetached()
             try {
                 WeatherManager.removeListener(this)
                 mainHandler.removeCallbacks(dateRefreshRunnable)
             } catch (_: Throwable) {}
+        }
+
+        override fun onCountdownStateChanged(state: CountdownState) {
+            syncWidgetVisibilities(animate = true)
+        }
+
+        private var isCarouselRunning = false
+        private var showingCountdownInCarousel = true
+        private val carouselIntervalMs = 8000L
+        private val carouselRunnable = object : Runnable {
+            override fun run() {
+                if (!isLandscapeLayout()) {
+                    stopCarousel()
+                    return
+                }
+                val hasMusic = isMusicVisible || (currentMusicState?.isPlaying == true)
+                val hasCountdown = CountdownManager.currentState !is CountdownState.Idle
+                if (hasMusic && hasCountdown) {
+                    showingCountdownInCarousel = !showingCountdownInCarousel
+                    applyCarouselViews(animate = true)
+                    mainHandler.postDelayed(this, carouselIntervalMs)
+                } else {
+                    stopCarousel()
+                    syncWidgetVisibilities(animate = true)
+                }
+            }
+        }
+
+        private fun startCarousel() {
+            if (isCarouselRunning) return
+            isCarouselRunning = true
+            showingCountdownInCarousel = true
+            applyCarouselViews(animate = false)
+            mainHandler.postDelayed(carouselRunnable, carouselIntervalMs)
+        }
+
+        private fun stopCarousel() {
+            isCarouselRunning = false
+            mainHandler.removeCallbacks(carouselRunnable)
+        }
+
+        private fun applyCarouselViews(animate: Boolean) {
+            if (showingCountdownInCarousel) {
+                musicWidgetController?.setVisible(false, animate = animate)
+                countdownWidgetController?.updateState(CountdownManager.currentState, animate = animate)
+            } else {
+                countdownWidgetController?.updateState(CountdownState.Idle, animate = animate)
+                musicWidgetController?.setVisible(true, animate = animate)
+            }
+        }
+
+        private fun syncWidgetVisibilities(animate: Boolean) {
+            val isLand = isLandscapeLayout()
+            val hasMusic = isMusicVisible || (currentMusicState?.isPlaying == true)
+            val countdownState = CountdownManager.currentState
+            val hasCountdown = countdownState !is CountdownState.Idle
+
+            if (isLand) {
+                if (hasMusic && hasCountdown) {
+                    if (countdownState is CountdownState.Completed) {
+                        stopCarousel()
+                        musicWidgetController?.setVisible(false, animate = animate)
+                        countdownWidgetController?.updateState(countdownState, animate = animate)
+                    } else {
+                        startCarousel()
+                    }
+                } else {
+                    stopCarousel()
+                    if (hasCountdown) {
+                        musicWidgetController?.setVisible(false, animate = animate)
+                        countdownWidgetController?.updateState(countdownState, animate = animate)
+                    } else {
+                        countdownWidgetController?.updateState(CountdownState.Idle, animate = animate)
+                        musicWidgetController?.setVisible(hasMusic, animate = animate)
+                    }
+                }
+            } else {
+                stopCarousel()
+                countdownWidgetController?.updateState(countdownState, animate = animate)
+                musicWidgetController?.setVisible(hasMusic, animate = animate)
+            }
         }
 
         override fun onWeatherUpdated(info: WeatherInfo) {

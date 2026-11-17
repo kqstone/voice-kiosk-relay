@@ -89,6 +89,15 @@
 
         </LinearLayout>
 
+        <!-- Countdown Timer Widget: directly below weather capsule, above Now-Playing, hidden by default -->
+        <include
+            android:id="@+id/layoutCountdown"
+            layout="@layout/widget_home_countdown"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:visibility="gone" />
+
         <!-- Now-Playing Widget: directly below weather capsule, full width, 20dp margin, OLED dark -->
         <include
             android:id="@+id/layoutNowPlaying"

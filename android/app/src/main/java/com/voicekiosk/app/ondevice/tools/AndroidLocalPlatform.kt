@@ -11,6 +11,7 @@ import android.os.SystemClock
 import android.provider.MediaStore
 import android.util.Log
 import android.view.KeyEvent
+import com.voicekiosk.app.countdown.CountdownManager
 import com.voicekiosk.app.media.BackgroundLaunchResult
 import com.voicekiosk.app.media.BackgroundMediaLauncher
 import java.time.ZoneId
@@ -117,28 +118,16 @@ class AndroidLocalPlatform(
     }
 
     override fun startTimer(seconds: Int, label: String?): Boolean {
-        lateinit var r: Runnable
-        r = Runnable {
-            synchronized(timers) { timers.remove(r) }
-            onTimerFired(label, seconds)
-        }
-        synchronized(timers) {
-            if (timers.size >= MAX_TIMERS) return false
-            timers += r
-        }
-        return handler.postDelayed(r, seconds * 1000L)
+        return CountdownManager.startTimer(seconds, label, onTimerFired)
     }
 
-    override fun cancelTimers(): Int = synchronized(timers) {
-        val n = timers.size
-        timers.forEach { handler.removeCallbacks(it) }
-        timers.clear()
-        n
+    override fun cancelTimers(): Int {
+        return CountdownManager.cancelTimers()
     }
 
     companion object {
         private const val TAG = "LocalPlatform"
-        const val MAX_TIMERS = 5
+        const val MAX_TIMERS = CountdownManager.MAX_CONCURRENT_COUNTDOWNS
 
         const val ACTION_MEDIA_BROWSER_SERVICE = "android.media.browse.MediaBrowserService"
         const val ACTION_MEDIA_BROWSER_SERVICE_COMPAT = "androidx.media.MediaBrowserServiceCompat"

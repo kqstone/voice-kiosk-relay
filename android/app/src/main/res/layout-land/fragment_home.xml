@@ -101,6 +101,16 @@
 
         </LinearLayout>
 
+        <!-- Countdown Timer Widget: Right Column (Fixed width 360dp, vertically centered) -->
+        <include
+            android:id="@+id/layoutCountdown"
+            layout="@layout/widget_home_countdown"
+            android:layout_width="360dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_vertical"
+            android:layout_marginStart="32dp"
+            android:visibility="gone" />
+
         <!-- Right Column: Now-Playing Widget (Fixed width 360dp, vertically centered) -->
         <include
             android:id="@+id/layoutNowPlaying"

@@ -237,7 +237,8 @@ class HomeLayoutTest {
             "tvWeatherDesc",
             "tvSlideHint",
             "tvWakePrompt",
-            "layoutNowPlaying"
+            "layoutNowPlaying",
+            "layoutCountdown"
         )
 
         for (id in essentialHomeViewHolderIds) {
@@ -454,5 +455,87 @@ class HomeLayoutTest {
         // Music state still preserved
         assertEquals("夜曲", activeMusicState.title)
         assertTrue(activeMusicState.isPlaying)
+    }
+
+    // =========================================================================
+    // 7. Phase 4 Countdown Widget Integration Tests
+    // =========================================================================
+
+    @Test
+    fun testPortraitLayout_countdownIsBelowWeatherCapsuleAndAboveNowPlaying() {
+        val portraitFile = locateLayoutFile("layout/fragment_home.xml")
+        val portraitDoc = parseXml(portraitFile)
+
+        val weatherCapsule = findElementByAndroidId(portraitDoc, "weatherCapsule")
+        val countdown = findElementByAndroidId(portraitDoc, "layoutCountdown")
+        val widget = findElementByAndroidId(portraitDoc, "layoutNowPlaying")
+
+        assertNotNull("weatherCapsule must be present in portrait", weatherCapsule)
+        assertNotNull("layoutCountdown must be present in portrait", countdown)
+        assertNotNull("layoutNowPlaying must be present in portrait", widget)
+
+        // All three share the same parent container in portrait
+        val parent = countdown?.parentNode as? Element
+        assertNotNull(parent)
+        assertEquals(parent, weatherCapsule?.parentNode)
+        assertEquals(parent, widget?.parentNode)
+        assertEquals("vertical", getAttribute(parent!!, "orientation"))
+
+        // In child ordering: weatherCapsule < layoutCountdown < layoutNowPlaying
+        val children = parent.childNodes
+        var weatherIdx = -1
+        var countdownIdx = -1
+        var widgetIdx = -1
+        for (i in 0 until children.length) {
+            val node = children.item(i)
+            if (node === weatherCapsule) weatherIdx = i
+            if (node === countdown) countdownIdx = i
+            if (node === widget) widgetIdx = i
+        }
+
+        assertTrue("weatherCapsule must appear before layoutCountdown", weatherIdx in 0 until countdownIdx)
+        assertTrue("layoutCountdown must appear before layoutNowPlaying", countdownIdx in 0 until widgetIdx)
+    }
+
+    @Test
+    fun testLandscapeLayout_countdownIsInsideLayoutHomeContent() {
+        val landscapeFile = locateLayoutFile("layout-land/fragment_home.xml")
+        val landDoc = parseXml(landscapeFile)
+
+        val countdown = findElementByAndroidId(landDoc, "layoutCountdown")
+        assertNotNull("layoutCountdown must be present in landscape", countdown)
+
+        val countdownParent = countdown?.parentNode as? Element
+        assertNotNull("countdownParent must not be null", countdownParent)
+        assertEquals(
+            "layoutHomeContent",
+            getAttribute(countdownParent!!, "id")?.removePrefix("@+id/")?.removePrefix("@id/")
+        )
+
+        // Verify layout_width is 360dp to match layoutNowPlaying
+        assertEquals("360dp", getAttribute(countdown!!, "layout_width"))
+    }
+
+    @Test
+    fun testCountdownWidgetLayout_internalStructureAndViews() {
+        val widgetFile = locateLayoutFile("layout/widget_home_countdown.xml")
+        val doc = parseXml(widgetFile)
+
+        val root = doc.documentElement
+        assertEquals("LinearLayout", root.tagName)
+        assertEquals("@drawable/bg_countdown_card", getAttribute(root, "background"))
+
+        val widgetIds = extractAllAndroidIds(doc)
+
+        // Core required countdown widget controls
+        assertTrue("Widget must contain layoutCountdownActive", widgetIds.contains("layoutCountdownActive"))
+        assertTrue("Widget must contain countdownArcView", widgetIds.contains("countdownArcView"))
+        assertTrue("Widget must contain tvCountdownLabel", widgetIds.contains("tvCountdownLabel"))
+        assertTrue("Widget must contain tvCountdownBadge", widgetIds.contains("tvCountdownBadge"))
+        assertTrue("Widget must contain btnCountdownCancel", widgetIds.contains("btnCountdownCancel"))
+        assertTrue("Widget must contain layoutCountdownCompletion", widgetIds.contains("layoutCountdownCompletion"))
+        assertTrue("Widget must contain tvCountdownCompleteTitle", widgetIds.contains("tvCountdownCompleteTitle"))
+        assertTrue("Widget must contain tvCountdownCompleteHint", widgetIds.contains("tvCountdownCompleteHint"))
+        assertTrue("Widget must contain btnCountdownDismiss", widgetIds.contains("btnCountdownDismiss"))
     }
 }
