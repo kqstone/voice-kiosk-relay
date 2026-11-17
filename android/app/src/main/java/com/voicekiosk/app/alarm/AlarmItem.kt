@@ -1,6 +1,7 @@
 package com.voicekiosk.app.alarm
 
 import org.json.JSONObject
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -24,9 +25,9 @@ data class AlarmItem(
     val targetTimeMillis: Long
         get() = (targetTimeUtc * 1000.0).toLong()
 
-    /** Anti-duplicate token pairing schedule id and target time. */
+    /** Anti-duplicate token pairing schedule id and target time. Plain decimal (never scientific notation, which Double.toString() produces for large epoch seconds). */
     val antiDuplicateToken: String
-        get() = "${id}_${targetTimeUtc}"
+        get() = "${id}_${"%.1f".format(Locale.US, targetTimeUtc)}"
 
     val isTerminal: Boolean
         get() = status in TERMINAL_STATUSES

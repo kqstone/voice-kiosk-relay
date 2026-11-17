@@ -106,10 +106,11 @@ class LocalScheduleCacheTest {
     fun testApplySnapshot_incrementalAndReset() {
         val cache = LocalScheduleCache(null, PlainByteCodec)
 
-        // Initial snapshot
+        // Initial snapshot (explicit old updatedAtUtc: the default is wall-clock
+        // now, so a fixed incremental timestamp would always lose LWW).
         val initialItems = listOf(
-            ScheduleItem(id = "sch_1", title = "Task 1", targetTimeUtc = 100.0),
-            ScheduleItem(id = "sch_2", title = "Task 2", targetTimeUtc = 200.0)
+            ScheduleItem(id = "sch_1", title = "Task 1", targetTimeUtc = 100.0, updatedAtUtc = 100.0),
+            ScheduleItem(id = "sch_2", title = "Task 2", targetTimeUtc = 200.0, updatedAtUtc = 100.0)
         )
         cache.applySnapshot(
             incoming = initialItems,

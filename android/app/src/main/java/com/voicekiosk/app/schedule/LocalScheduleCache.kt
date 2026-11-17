@@ -1,7 +1,6 @@
 package com.voicekiosk.app.schedule
 
 import android.content.Context
-import android.util.Log
 import com.voicekiosk.app.alarm.PlainByteCodec
 import com.voicekiosk.app.memory.ByteCodec
 import com.voicekiosk.app.memory.KeystoreCodec
@@ -140,7 +139,7 @@ class LocalScheduleCache(
                 tmp.renameTo(f)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to save schedule cache to ${f.path}", e)
+            // No Log here: android.util.Log throws in local unit tests.
         }
     }
 
@@ -168,7 +167,7 @@ class LocalScheduleCache(
                 pendingQueue.add(ScheduleItem.fromJsonObject(obj))
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Unreadable schedule cache file, starting empty", e)
+            // No Log here: android.util.Log throws in local unit tests.
             snapshot.clear()
             pendingQueue.clear()
             cursor = ""
@@ -177,7 +176,6 @@ class LocalScheduleCache(
     }
 
     companion object {
-        private const val TAG = "LocalScheduleCache"
         private const val FILE_NAME = "schedules/schedules_cache.bin"
         const val MAX_QUEUE = 100
 

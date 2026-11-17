@@ -681,7 +681,7 @@ class HomeLayoutTest {
     }
 
     @Test
-    fun testLandscapeLayout_countdownIsInsideLayoutHomeContent() {
+    fun testLandscapeLayout_countdownIsInsideRightContainer() {
         val landscapeFile = locateLayoutFile("layout-land/fragment_home.xml")
         val landDoc = parseXml(landscapeFile)
 
@@ -690,13 +690,15 @@ class HomeLayoutTest {
 
         val countdownParent = countdown?.parentNode as? Element
         assertNotNull("countdownParent must not be null", countdownParent)
+        // Merged layout: the countdown lives in the 380dp right slot, next to
+        // the weather forecast and the now-playing card.
         assertEquals(
-            "layoutHomeContent",
+            "layoutRightContainer",
             getAttribute(countdownParent!!, "id")?.removePrefix("@+id/")?.removePrefix("@id/")
         )
 
-        // Verify layout_width is 360dp to match layoutNowPlaying
-        assertEquals("360dp", getAttribute(countdown!!, "layout_width"))
+        // Verify layout_width is match_parent to fill the right slot
+        assertEquals("match_parent", getAttribute(countdown!!, "layout_width"))
     }
 
     @Test

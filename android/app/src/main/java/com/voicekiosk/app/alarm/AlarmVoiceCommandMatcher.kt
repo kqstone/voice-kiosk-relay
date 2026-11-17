@@ -82,8 +82,10 @@ object AlarmVoiceCommandMatcher {
         val trimmed = text.trim()
         val lower = trimmed.lowercase(Locale.ROOT)
 
-        // 1. Check Snooze first if specific snooze phrases are present
-        val cnSnoozeMatch = SNOOZE_CHINESE_WITH_DURATION.find(trimmed)
+        // 1. Check Snooze first if specific snooze phrases are present.
+        // The duration pattern must start the utterance: "倒计时十分钟" is a
+        // countdown command, not a snooze command, and must not match.
+        val cnSnoozeMatch = SNOOZE_CHINESE_WITH_DURATION.find(trimmed)?.takeIf { it.range.first == 0 }
         if (cnSnoozeMatch != null) {
             val numStr = cnSnoozeMatch.groups["num"]?.value.orEmpty()
             val parsedMinutes = parseMinutes(numStr) ?: 5

@@ -1,7 +1,6 @@
 package com.voicekiosk.app.alarm
 
 import android.content.Context
-import android.util.Log
 import com.voicekiosk.app.memory.ByteCodec
 import com.voicekiosk.app.memory.KeystoreCodec
 import org.json.JSONArray
@@ -97,7 +96,7 @@ class LocalAlarmStore(
                 tmp.renameTo(f)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to save alarm store to ${f.path}", e)
+            // No Log here: android.util.Log throws in local unit tests.
         }
     }
 
@@ -115,13 +114,12 @@ class LocalAlarmStore(
                 alarms.add(AlarmItem.fromJsonObject(itemObj))
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Unreadable alarm store file, starting empty", e)
+            // No Log here: android.util.Log throws in local unit tests.
             alarms.clear()
         }
     }
 
     companion object {
-        private const val TAG = "LocalAlarmStore"
         private const val FILE_NAME = "alarms/alarms_cache.bin"
 
         @Volatile

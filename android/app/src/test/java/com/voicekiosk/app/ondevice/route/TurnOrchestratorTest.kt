@@ -296,7 +296,9 @@ class TurnOrchestratorTest {
     fun preGateSendsNonActionSentencesStraightToCloud() {
         val clf = FakeClassifier { _, _ -> model(Intents.VOLUME, Route.LOCAL, 0.95, "direction" to "up") }
         val o = orch(clf)
-        for (t in listOf("讲个笑话", "今天有什么新闻", "怎么把音量调大", "你是谁", "明天适合爬山吗", "设个明天早上七点的闹钟")) {
+        for (t in listOf("讲个笑话", "今天有什么新闻", "怎么把音量调大", "你是谁", "明天适合爬山吗")) {
+            // NOTE: "设个明天早上七点的闹钟" is NOT in this list: the alarm rule
+            // answers it locally (LOCAL_RULE), so it never reaches the pre-gate.
             val r = o.handle(t)
             assertEquals(t, TurnSource.CLOUD, r.source)
             assertEquals(t, "gated", r.trace.modelStatus)
